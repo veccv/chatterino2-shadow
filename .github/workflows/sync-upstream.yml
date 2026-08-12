@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: 2026 veccv
+# SPDX-License-Identifier: MIT
+---
+name: Sync upstream
+
+on:
+  schedule:
+    # Twice daily (UTC)
+    - cron: "0 5,17 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: Upstream repository (owner/name)
+        required: true
+        default: Chatterino/chatterino2
+      upstream_branch:
+        description: Upstream branch to rebase onto
+        required: true
+        default: master
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    name: Rebase master onto upstream
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # Needed so the rebase push uses a token with contents:write
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rebase onto upstream and push
+        id: rebase
+        env:
+          UPSTREAM_REPO: ${{ inputs.upstream_repo || 'Chatterino/chatterino2' }}
+          UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'master' }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+
+          BEFORE="$(git rev-parse HEAD)"
+          UPSTREAM_SHA="$(git rev-parse "upstream/${UPSTREAM_BRANCH}")"
+          echo "Local HEAD:     ${BEFORE}"
+          echo "Upstream HEAD:  ${UPSTREAM_SHA}"
+
+          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" HEAD; then
+            echo "Already up to date (upstream is an ancestor of this branch)."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if ! git rebase "upstream/${UPSTREAM_BRANCH}"; then
+            git rebase --abort || true
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "conflict=true" >> "${GITHUB_OUTPUT}"
+            echo "::error::Rebase onto upstream/${UPSTREAM_BRANCH} failed due to conflicts."
+            exit 1
+          fi
+
+          AFTER="$(git rev-parse HEAD)"
+          echo "Rebased HEAD:   ${AFTER}"
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+          echo "before=${BEFORE}" >> "${GITHUB_OUTPUT}"
+          echo "after=${AFTER}" >> "${GITHUB_OUTPUT}"
+
+          git push --force-with-lease origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Create or update conflict issue
+        if: failure() && steps.rebase.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REPO: ${{ inputs.upstream_repo || 'Chatterino/chatterino2' }}
+          UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'master' }}
+        run: |
+          set -euo pipefail
+
+          TITLE="Upstream sync rebase conflict"
+          BODY="$(cat <<EOF
+          Automatic rebase of \`master\` onto \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` failed due to conflicts.
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Resolve locally:
+          \`\`\`bash
+          git fetch https://github.com/${UPSTREAM_REPO}.git ${UPSTREAM_BRANCH}
+          git rebase FETCH_HEAD
+          # fix conflicts, then:
+          git push --force-with-lease origin master
+          \`\`\`
+          EOF
+          )"
+
+          EXISTING="$(gh issue list --state open --search "in:title ${TITLE}" --json number --jq '.[0].number // empty')"
+          if [ -n "${EXISTING}" ]; then
+            gh issue comment "${EXISTING}" --body "Sync failed again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            gh issue create --title "${TITLE}" --body "${BODY}"
+          fi
