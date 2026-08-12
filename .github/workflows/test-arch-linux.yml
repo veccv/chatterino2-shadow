@@ -22,6 +22,8 @@ concurrency:
 jobs:
   test:
     name: "Test Arch Linux"
+    # Skip on forks — release downloads and Arch CI are flaky / expensive here.
+    if: github.repository == 'Chatterino/chatterino2'
     runs-on: ubuntu-latest
     container: archlinux:base-devel
 
@@ -46,12 +48,26 @@ jobs:
         working-directory: /tmp
 
       - name: Download and extract Twitch PubSub Server Test
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -eu
           mkdir pubsub-server-test
-          curl -L -o pubsub-server.tar.gz "https://github.com/Chatterino/twitch-pubsub-server-test/releases/download/${{ env.TWITCH_PUBSUB_SERVER_TAG }}/server-${{ env.TWITCH_PUBSUB_SERVER_TAG }}-linux-amd64.tar.gz"
+          url="https://github.com/Chatterino/twitch-pubsub-server-test/releases/download/${TWITCH_PUBSUB_SERVER_TAG}/server-${TWITCH_PUBSUB_SERVER_TAG}-linux-amd64.tar.gz"
+          for i in 1 2 3 4 5; do
+            curl --fail --retry 3 --retry-all-errors -L \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              -o pubsub-server.tar.gz "$url" && break
+            sleep $((i * 2))
+          done
+          # Detect GitHub JSON error pages (e.g. rate limit / not found) before tar
+          if ! gzip -t pubsub-server.tar.gz 2>/dev/null; then
+            echo "Downloaded file is not a gzip archive:"
+            head -c 500 pubsub-server.tar.gz || true
+            exit 1
+          fi
           tar -xzf pubsub-server.tar.gz -C pubsub-server-test
-          cd pubsub-server-test
-          cd ..
 
       - name: Configure
         run: |

@@ -22,6 +22,8 @@ env:
 jobs:
   build-vm:
     name: "Build FreeBSD"
+    # Skip on personal forks — FreeBSD VM image downloads are flaky / expensive here.
+    if: github.repository == 'Chatterino/chatterino2' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     env:
