@@ -444,6 +444,14 @@ public:
          FailureCallback<QString> failureCallback),
         (override));
 
+    // check user subscription
+    MOCK_METHOD(
+        void, checkUserSubscription,
+        (QString userID, QString broadcasterID, const QObject *caller,
+         ResultCallback<std::optional<HelixUserSubscription>> successCallback,
+         FailureCallback<QString> failureCallback),
+        (override));
+
     // create poll
     MOCK_METHOD(void, createPoll,
                 (QString broadcasterID, QString title, QStringList choices,

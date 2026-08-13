@@ -15,6 +15,7 @@
 #include "providers/ffz/FfzEmotes.hpp"
 #include "providers/twitch/api/Helix.hpp"
 #include "providers/twitch/eventsub/SubscriptionHandle.hpp"
+#include "providers/twitch/TwitchBadge.hpp"
 #include "providers/twitch/TwitchEmotes.hpp"
 #include "util/QStringHash.hpp"
 #include "util/ThreadGuard.hpp"
@@ -32,6 +33,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 class TestIrcMessageHandlerP;
 class TestEventSubMessagesP;
@@ -207,6 +209,9 @@ public:
                            const QColor &usernameColor = {},
                            const QString &id = {},
                            const QString &replyParentId = {});
+    void setSelfTwitchBadges(std::vector<TwitchBadge> badges,
+                             std::unordered_map<QString, QString> badgeInfos);
+    void setSelfSubscriptionBadge(std::optional<TwitchBadge> badge);
     bool isMod() const override;
     bool isVip() const;
     bool isStaff() const;
@@ -471,6 +476,20 @@ private:
                              std::optional<ShadowSendTarget> target,
                              bool parentIsShadow = false);
 
+    struct TwitchUserCosmetics {
+        std::vector<TwitchBadge> badges;
+        std::unordered_map<QString, QString> badgeInfos;
+        QString userID;
+        bool useChannelBadgeSets = true;
+    };
+    struct SelfTwitchBadges {
+        std::vector<TwitchBadge> badges;
+        std::unordered_map<QString, QString> badgeInfos;
+        bool received = false;
+    };
+    TwitchUserCosmetics cosmeticsForLogin(const QString &login) const;
+    void refreshBannedSelfBadges();
+
     struct NameOptions {
         // displayName is the non-CJK-display name for this user
         // This will always be the same as their `name_`, but potentially with different casing
@@ -622,6 +641,8 @@ private:
     bool vip_ = false;
     bool staff_ = false;
     UniqueAccess<QString> roomID_;
+    UniqueAccess<SelfTwitchBadges> selfTwitchBadges_;
+    std::optional<TwitchBadge> selfSubscriptionBadge_;
 
     // --
     QString lastSentMessage_;

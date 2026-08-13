@@ -493,6 +493,17 @@ struct HelixFollowedChannel {
     }
 };
 
+struct HelixUserSubscription {
+    QString tier;
+    bool isGift = false;
+
+    explicit HelixUserSubscription(const QJsonObject &jsonObject)
+        : tier(jsonObject["tier"].toString())
+        , isGift(jsonObject["is_gift"].toBool())
+    {
+    }
+};
+
 struct HelixSendMessageArgs {
     QString broadcasterID;
     QString senderID;
@@ -1122,6 +1133,12 @@ public:
         ResultCallback<std::optional<HelixFollowedChannel>> successCallback,
         FailureCallback<QString> failureCallback) = 0;
 
+    /// https://dev.twitch.tv/docs/api/reference/#check-user-subscription
+    virtual void checkUserSubscription(
+        QString userID, QString broadcasterID, const QObject *caller,
+        ResultCallback<std::optional<HelixUserSubscription>> successCallback,
+        FailureCallback<QString> failureCallback) = 0;
+
     /// https://dev.twitch.tv/docs/api/reference#create-poll
     virtual void createPoll(QString broadcasterID, QString title,
                             QStringList choices, std::chrono::seconds duration,
@@ -1559,6 +1576,12 @@ public:
     void getFollowedChannel(
         QString userID, QString broadcasterID, const QObject *caller,
         ResultCallback<std::optional<HelixFollowedChannel>> successCallback,
+        FailureCallback<QString> failureCallback) final;
+
+    /// https://dev.twitch.tv/docs/api/reference/#check-user-subscription
+    void checkUserSubscription(
+        QString userID, QString broadcasterID, const QObject *caller,
+        ResultCallback<std::optional<HelixUserSubscription>> successCallback,
         FailureCallback<QString> failureCallback) final;
 
     /// https://dev.twitch.tv/docs/api/reference#create-poll

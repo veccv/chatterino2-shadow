@@ -19,9 +19,13 @@
 #include "providers/bttv/BttvEmotes.hpp"
 #include "providers/ffz/FfzEmotes.hpp"
 #include "providers/seventv/SeventvEmotes.hpp"
+#include "providers/twitch/api/Helix.hpp"
+#include "providers/twitch/TwitchBadge.hpp"
+#include "providers/twitch/TwitchBadges.hpp"
 #include "Test.hpp"
 
 #include <QColor>
+#include <QJsonDocument>
 #include <QString>
 #include <QtCore/qtestsupport_core.h>
 
@@ -70,6 +74,11 @@ public:
         return &this->logging;
     }
 
+    TwitchBadges *getTwitchBadges() override
+    {
+        return &this->twitchBadges;
+    }
+
     AccountController accounts;
     mock::MockTwitchIrcServer twitch;
     mock::EmptyLogging logging;
@@ -77,6 +86,7 @@ public:
     BttvEmotes bttvEmotes;
     FfzEmotes ffzEmotes;
     SeventvEmotes seventvEmotes;
+    TwitchBadges twitchBadges;
 };
 
 class TwitchChannelRestriction : public ::testing::Test
@@ -373,6 +383,186 @@ TEST_F(TwitchChannelRestriction, ShadowLineUsesBadgeInsteadOfText)
     EXPECT_FALSE(foundShadowText);
     EXPECT_TRUE(
         messages[0]->searchText.startsWith(QStringLiteral("Shadow user ")));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineShowsSelfTwitchBadges)
+{
+    this->channel->setSelfTwitchBadges(
+        {TwitchBadge(QStringLiteral("moderator"), QStringLiteral("1")),
+         TwitchBadge(QStringLiteral("subscriber"), QStringLiteral("24"))},
+        {{QStringLiteral("subscriber"), QStringLiteral("27")}});
+
+    this->channel->addShadowChatLine(
+        this->app->accounts.twitch.getCurrent()->getUserName(), "still here");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    ASSERT_EQ(messages[0]->twitchBadges.size(), 2);
+    EXPECT_EQ(messages[0]->twitchBadges[0].key_, QStringLiteral("moderator"));
+    EXPECT_EQ(messages[0]->twitchBadges[1].key_, QStringLiteral("subscriber"));
+    EXPECT_EQ(messages[0]->twitchBadgeInfos.at(QStringLiteral("subscriber")),
+              QStringLiteral("27"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineCopiesTwitchBadgesFromLastIrcLine)
+{
+    auto irc = std::make_shared<Message>();
+    irc->loginName = QStringLiteral("pajlada");
+    irc->userID = QStringLiteral("11148817");
+    irc->twitchBadges = {
+        TwitchBadge(QStringLiteral("broadcaster"), QStringLiteral("1"))};
+    this->channel->addMessage(irc, MessageContext::Original);
+
+    this->channel->addShadowChatLine("pajlada", "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 2);
+    ASSERT_TRUE(messages[1]->flags.has(MessageFlag::ShadowMessage));
+    ASSERT_EQ(messages[1]->twitchBadges.size(), 1);
+    EXPECT_EQ(messages[1]->twitchBadges[0].key_,
+              QStringLiteral("broadcaster"));
+    EXPECT_EQ(messages[1]->userID, QStringLiteral("11148817"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineSelfCopiesIrcBeforeUserstate)
+{
+    const auto selfLogin =
+        this->app->accounts.twitch.getCurrent()->getUserName();
+
+    auto irc = std::make_shared<Message>();
+    irc->loginName = selfLogin;
+    irc->userID = QStringLiteral("42");
+    irc->twitchBadges = {
+        TwitchBadge(QStringLiteral("vip"), QStringLiteral("1"))};
+    this->channel->addMessage(irc, MessageContext::Original);
+
+    this->channel->addShadowChatLine(selfLogin, "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 2);
+    ASSERT_EQ(messages[1]->twitchBadges.size(), 1);
+    EXPECT_EQ(messages[1]->twitchBadges[0].key_, QStringLiteral("vip"));
+    EXPECT_EQ(messages[1]->userID, QStringLiteral("42"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineEmptyUserstateDoesNotCopyIrc)
+{
+    const auto selfLogin =
+        this->app->accounts.twitch.getCurrent()->getUserName();
+
+    auto irc = std::make_shared<Message>();
+    irc->loginName = selfLogin;
+    irc->twitchBadges = {
+        TwitchBadge(QStringLiteral("vip"), QStringLiteral("1"))};
+    this->channel->addMessage(irc, MessageContext::Original);
+
+    this->channel->setSelfTwitchBadges({}, {});
+    this->channel->addShadowChatLine(selfLogin, "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 2);
+    EXPECT_TRUE(messages[1]->twitchBadges.empty());
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineUsesCachedBadgesWithoutUserstate)
+{
+    const auto selfLogin =
+        this->app->accounts.twitch.getCurrent()->getUserName();
+    this->app->accounts.twitch.getCurrent()->setGlobalTwitchBadges(
+        {TwitchBadge(QStringLiteral("premium"), QStringLiteral("1")),
+         TwitchBadge(QStringLiteral("subscriber"), QStringLiteral("24")),
+         TwitchBadge(QStringLiteral("moderator"), QStringLiteral("1"))},
+        {{QStringLiteral("subscriber"), QStringLiteral("27")}});
+
+    this->channel->addShadowChatLine(selfLogin, "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    ASSERT_EQ(messages[0]->twitchBadges.size(), 1);
+    EXPECT_EQ(messages[0]->twitchBadges[0].key_, QStringLiteral("premium"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineBannedChannelUsesOwnSubscription)
+{
+    const auto selfLogin =
+        this->app->accounts.twitch.getCurrent()->getUserName();
+    this->app->accounts.twitch.getCurrent()->setGlobalTwitchBadges(
+        {TwitchBadge(QStringLiteral("premium"), QStringLiteral("1"))}, {});
+    this->channel->setSelfSubscriptionBadge(
+        TwitchBadge(QStringLiteral("subscriber"), QStringLiteral("0")));
+
+    this->channel->addShadowChatLine(selfLogin, "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    ASSERT_EQ(messages[0]->twitchBadges.size(), 2);
+    EXPECT_EQ(messages[0]->twitchBadges[0].key_, QStringLiteral("subscriber"));
+    EXPECT_EQ(messages[0]->twitchBadges[0].value_, QStringLiteral("0"));
+    EXPECT_EQ(messages[0]->twitchBadges[1].key_, QStringLiteral("premium"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineUserstateWinsOverCachedBadges)
+{
+    const auto selfLogin =
+        this->app->accounts.twitch.getCurrent()->getUserName();
+    this->app->accounts.twitch.getCurrent()->setGlobalTwitchBadges(
+        {TwitchBadge(QStringLiteral("premium"), QStringLiteral("1"))}, {});
+    this->channel->setSelfTwitchBadges(
+        {TwitchBadge(QStringLiteral("moderator"), QStringLiteral("1"))}, {});
+
+    this->channel->addShadowChatLine(selfLogin, "from shadow");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    ASSERT_EQ(messages[0]->twitchBadges.size(), 1);
+    EXPECT_EQ(messages[0]->twitchBadges[0].key_, QStringLiteral("moderator"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineRendersSelfTwitchBadgeEmote)
+{
+    constexpr auto badgeJson = R"({
+        "data": [{
+            "set_id": "moderator",
+            "versions": [{
+                "id": "1",
+                "title": "Moderator",
+                "image_url_1x": "https://example.com/mod.png",
+                "image_url_2x": "https://example.com/mod.png",
+                "image_url_4x": "https://example.com/mod.png"
+            }]
+        }]
+    })";
+    this->channel->addTwitchBadgeSets(
+        HelixChannelBadges{QJsonDocument::fromJson(badgeJson).object()});
+    this->channel->setSelfTwitchBadges(
+        {TwitchBadge(QStringLiteral("moderator"), QStringLiteral("1"))}, {});
+
+    this->channel->addShadowChatLine(
+        this->app->accounts.twitch.getCurrent()->getUserName(), "still here");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+
+    bool foundShadowBadge = false;
+    bool foundModBadge = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        auto *badge = dynamic_cast<const BadgeElement *>(element.get());
+        if (badge == nullptr)
+        {
+            continue;
+        }
+        if (element->getTooltip() == QStringLiteral("Shadow user"))
+        {
+            foundShadowBadge = true;
+        }
+        if (element->getTooltip() == QStringLiteral("Moderator"))
+        {
+            foundModBadge = true;
+        }
+    }
+    EXPECT_TRUE(foundShadowBadge);
+    EXPECT_TRUE(foundModBadge);
 }
 
 TEST_F(TwitchChannelRestriction, ShadowLineUsesNickColor)
