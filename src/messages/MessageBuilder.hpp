@@ -8,6 +8,7 @@
 #include "common/Outcome.hpp"
 #include "messages/MessageColor.hpp"
 #include "messages/MessageFlag.hpp"
+#include "providers/twitch/TwitchBadge.hpp"
 
 #include <IrcMessage>
 #include <IrcTagsRef>
@@ -20,7 +21,9 @@
 
 #include <ctime>
 #include <memory>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace chatterino {
 
@@ -266,7 +269,10 @@ public:
         TwitchChannel *channel = nullptr, const QColor &usernameColor = {},
         const QString &id = {},
         const std::shared_ptr<MessageThread> &thread = {},
-        const MessagePtr &parent = {});
+        const MessagePtr &parent = {},
+        std::vector<TwitchBadge> twitchBadges = {},
+        std::unordered_map<QString, QString> twitchBadgeInfos = {},
+        const QString &userID = {}, bool useChannelBadgeSets = true);
 
 private:
     struct TextState {

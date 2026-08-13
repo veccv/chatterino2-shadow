@@ -281,16 +281,21 @@ std::optional<EmotePtr> getTwitchBadge(const TwitchBadge &badge,
 void appendBadges(MessageBuilder *builder,
                   const std::vector<TwitchBadge> &badges,
                   const std::unordered_map<QString, QString> &badgeInfos,
-                  const TwitchChannel *twitchChannel)
+                  const TwitchChannel *twitchChannel,
+                  bool useChannelBadgeSets = true)
 {
-    if (twitchChannel == nullptr)
-    {
-        return;
-    }
-
     for (const auto &badge : badges)
     {
-        auto badgeEmote = getTwitchBadge(badge, twitchChannel);
+        std::optional<EmotePtr> badgeEmote;
+        if (useChannelBadgeSets && twitchChannel != nullptr)
+        {
+            badgeEmote = getTwitchBadge(badge, twitchChannel);
+        }
+        else if (auto globalBadge = getApp()->getTwitchBadges()->badge(
+                     badge.key_, badge.value_))
+        {
+            badgeEmote = globalBadge;
+        }
         if (!badgeEmote)
         {
             continue;
@@ -302,7 +307,7 @@ void appendBadges(MessageBuilder *builder,
             const auto &cheerAmount = badge.value_;
             tooltip = QString("Twitch cheer %0").arg(cheerAmount);
         }
-        else if (badge.key_ == "moderator" &&
+        else if (twitchChannel != nullptr && badge.key_ == "moderator" &&
                  getSettings()->useCustomFfzModeratorBadges)
         {
             if (auto customModBadge = twitchChannel->ffzCustomModBadge())
@@ -316,7 +321,8 @@ void appendBadges(MessageBuilder *builder,
                 continue;
             }
         }
-        else if (badge.key_ == "vip" && getSettings()->useCustomFfzVipBadges)
+        else if (twitchChannel != nullptr && badge.key_ == "vip" &&
+                 getSettings()->useCustomFfzVipBadges)
         {
             if (auto customVipBadge = twitchChannel->ffzCustomVipBadge())
             {
@@ -588,7 +594,10 @@ MessagePtr makeSystemMessage(const QString &text, const QTime &time)
 MessagePtr MessageBuilder::makeShadowChatMessage(
     const QString &login, const QString &text, TwitchChannel *channel,
     const QColor &usernameColor, const QString &id,
-    const std::shared_ptr<MessageThread> &thread, const MessagePtr &parent)
+    const std::shared_ptr<MessageThread> &thread, const MessagePtr &parent,
+    std::vector<TwitchBadge> twitchBadges,
+    std::unordered_map<QString, QString> twitchBadgeInfos,
+    const QString &userID, bool useChannelBadgeSets)
 {
     MessageBuilder builder;
     if (usernameColor.isValid())
@@ -598,10 +607,13 @@ MessagePtr MessageBuilder::makeShadowChatMessage(
     }
 
     builder->id = id;
+    builder->userID = userID;
     builder->serverReceivedTime = QDateTime::currentDateTime();
     builder.attachReplyThread(thread, parent);
     builder.emplace<TimestampElement>();
     builder.appendShadowMark();
+    appendBadges(&builder, twitchBadges, twitchBadgeInfos, channel,
+                 useChannelBadgeSets);
 
     MessageColor nickColor = usernameColor.isValid()
                                  ? MessageColor(usernameColor)

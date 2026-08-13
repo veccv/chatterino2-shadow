@@ -9,6 +9,7 @@
 #include "common/UniqueAccess.hpp"
 #include "controllers/accounts/Account.hpp"
 #include "messages/Emote.hpp"
+#include "providers/twitch/TwitchBadge.hpp"
 #include "providers/twitch/TwitchEmotes.hpp"
 #include "providers/twitch/TwitchUser.hpp"
 #include "util/CancellationToken.hpp"
@@ -24,7 +25,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace chatterino {
 
@@ -117,6 +120,15 @@ public:
     /// invoked with @a caller and an optional error.
     void reloadEmotes(void *caller = nullptr);
 
+    struct CachedTwitchBadges {
+        std::vector<TwitchBadge> badges;
+        std::unordered_map<QString, QString> badgeInfos;
+    };
+    void setGlobalTwitchBadges(
+        const std::vector<TwitchBadge> &badges,
+        const std::unordered_map<QString, QString> &badgeInfos);
+    CachedTwitchBadges globalTwitchBadges() const;
+
 private:
     QString oauthClient_;
     QString oauthToken_;
@@ -136,6 +148,7 @@ private:
     ScopedCancellationToken emoteToken_;
     UniqueAccess<std::shared_ptr<const TwitchEmoteSetMap>> emoteSets_;
     UniqueAccess<std::shared_ptr<const EmoteMap>> emotes_;
+    UniqueAccess<CachedTwitchBadges> cachedTwitchBadges_;
 
     QString seventvUserID_;
 
