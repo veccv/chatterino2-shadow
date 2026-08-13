@@ -44,6 +44,11 @@ enum class ShadowViewMode : std::uint8_t {
     Shadow,
 };
 
+enum class ShadowSendTarget : std::uint8_t {
+    Normal,
+    Shadow,
+};
+
 struct SplitDescriptor {
     // Twitch or mentions or watching or live or automod or whispers or IRC
     QString type_;
@@ -62,6 +67,8 @@ struct SplitDescriptor {
     QList<QUuid> filters_;
 
     ShadowViewMode shadowViewMode_{ShadowViewMode::Both};
+
+    ShadowSendTarget shadowSendTarget_{ShadowSendTarget::Shadow};
 
     static SplitDescriptor loadFromJSON(const QJsonObject &root);
 

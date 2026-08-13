@@ -51,7 +51,8 @@ QString sendReply(const CommandContext &ctx)
             }
 
             QString reply = ctx.words.mid(2).join(" ");
-            ctx.twitchChannel->sendReply(reply, msg->id);
+            ctx.twitchChannel->sendReply(
+                reply, msg->id, msg->flags.has(MessageFlag::ShadowMessage));
             return "";
         }
     }

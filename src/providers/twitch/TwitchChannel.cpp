@@ -193,7 +193,8 @@ TwitchChannel::TwitchChannel(const QString &name)
                 if (!ev.roomId.isEmpty() && ev.roomId == this->roomId())
                 {
                     this->addShadowChatLine(ev.login, ev.text,
-                                            QColor(ev.color));
+                                            QColor(ev.color), ev.id,
+                                            ev.replyParentId);
                 }
             });
     }
@@ -860,6 +861,17 @@ QString TwitchChannel::prepareMessage(const QString &message) const
 
 void TwitchChannel::sendMessage(const QString &message)
 {
+    this->sendMessageWithTarget(message, std::nullopt);
+}
+
+void TwitchChannel::sendMessage(const QString &message, ShadowSendTarget target)
+{
+    this->sendMessageWithTarget(message, target);
+}
+
+void TwitchChannel::sendMessageWithTarget(
+    const QString &message, std::optional<ShadowSendTarget> target)
+{
     auto *app = getApp();
     if (!app->getAccounts()->twitch.isLoggedIn())
     {
@@ -882,7 +894,7 @@ void TwitchChannel::sendMessage(const QString &message)
     }
 
     bool messageSent = false;
-    if (this->tryInterceptShadowSend(parsedMessage, messageSent))
+    if (this->tryInterceptShadowSend(parsedMessage, messageSent, target))
     {
         if (messageSent)
         {
@@ -898,7 +910,9 @@ void TwitchChannel::sendMessage(const QString &message)
         return;
     }
 
-    this->sendMessageSignal.invoke(parsedMessage, messageSent);
+    const bool allowShadowFallback = target != ShadowSendTarget::Normal;
+    this->sendMessageSignal.invoke(parsedMessage, messageSent,
+                                   allowShadowFallback);
     this->updateBttvActivity();
     this->updateSevenTVActivity();
 
@@ -910,6 +924,25 @@ void TwitchChannel::sendMessage(const QString &message)
 }
 
 void TwitchChannel::sendReply(const QString &message, const QString &replyId)
+{
+    this->sendReplyWithTarget(message, replyId, std::nullopt);
+}
+
+void TwitchChannel::sendReply(const QString &message, const QString &replyId,
+                              bool parentIsShadow)
+{
+    this->sendReplyWithTarget(message, replyId, std::nullopt, parentIsShadow);
+}
+
+void TwitchChannel::sendReply(const QString &message, const QString &replyId,
+                              ShadowSendTarget target, bool parentIsShadow)
+{
+    this->sendReplyWithTarget(message, replyId, target, parentIsShadow);
+}
+
+void TwitchChannel::sendReplyWithTarget(
+    const QString &message, const QString &replyId,
+    std::optional<ShadowSendTarget> target, bool parentIsShadow)
 {
     auto *app = getApp();
     if (!app->getAccounts()->twitch.isLoggedIn())
@@ -933,7 +966,18 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
     }
 
     bool messageSent = false;
-    if (this->tryInterceptShadowSend(parsedMessage, messageSent))
+    auto interceptTarget = target;
+    if (parentIsShadow)
+    {
+        interceptTarget = ShadowSendTarget::Shadow;
+    }
+    else if (auto parent = this->findMessageByID(replyId);
+             parent && parent->flags.has(MessageFlag::ShadowMessage))
+    {
+        interceptTarget = ShadowSendTarget::Shadow;
+    }
+    if (this->tryInterceptShadowSend(parsedMessage, messageSent,
+                                     interceptTarget, replyId))
     {
         if (messageSent)
         {
@@ -949,7 +993,9 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         return;
     }
 
-    this->sendReplySignal.invoke(parsedMessage, replyId, messageSent);
+    const bool allowShadowFallback = target != ShadowSendTarget::Normal;
+    this->sendReplySignal.invoke(parsedMessage, replyId, messageSent,
+                                 allowShadowFallback);
 
     if (messageSent)
     {
@@ -958,14 +1004,23 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
     }
 }
 
-bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
-                                           bool &sent)
+bool TwitchChannel::tryInterceptShadowSend(
+    const QString &parsedMessage, bool &sent,
+    std::optional<ShadowSendTarget> target, const QString &replyId)
 {
-    auto restriction = this->restriction();
-    if (restriction != ChannelRestriction::Banned &&
-        restriction != ChannelRestriction::TimedOut)
+    if (target == ShadowSendTarget::Normal)
     {
         return false;
+    }
+
+    if (target != ShadowSendTarget::Shadow)
+    {
+        auto restriction = this->restriction();
+        if (restriction != ChannelRestriction::Banned &&
+            restriction != ChannelRestriction::TimedOut)
+        {
+            return false;
+        }
     }
 
     auto *relay = getApp()->getShadowRelay();
@@ -985,7 +1040,7 @@ bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
     {
         color = account->color().name(QColor::HexRgb);
     }
-    if (!relay->publish(this->roomId(), parsedMessage, id, color))
+    if (!relay->publish(this->roomId(), parsedMessage, id, color, replyId))
     {
         this->addSystemMessage(
             QStringLiteral("Couldn't send to shadow chat."));
@@ -1001,13 +1056,16 @@ bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
     {
         login = account->getUserName();
     }
-    this->addShadowChatLine(login, parsedMessage, account->color());
+    this->addShadowChatLine(login, parsedMessage, account->color(), id,
+                            replyId);
     sent = true;
     return true;
 }
 
 void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
-                                      const QColor &usernameColor)
+                                      const QColor &usernameColor,
+                                      const QString &id,
+                                      const QString &replyParentId)
 {
     QColor nickColor = usernameColor;
     if (!nickColor.isValid())
@@ -1026,9 +1084,35 @@ void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
     {
         this->setUserColor(login, nickColor);
     }
-    this->addMessage(
-        MessageBuilder::makeShadowChatMessage(login, text, this, nickColor),
-        MessageContext::Original);
+
+    QString messageId = id;
+    if (messageId.isEmpty())
+    {
+        messageId = generateUuid();
+    }
+
+    std::shared_ptr<MessageThread> thread;
+    MessagePtr parent;
+    if (!replyParentId.isEmpty())
+    {
+        parent = this->findMessageByID(replyParentId);
+        if (parent)
+        {
+            if (parent->replyThread)
+            {
+                thread = parent->replyThread;
+            }
+            else
+            {
+                thread = this->getOrCreateThread(parent);
+            }
+        }
+    }
+
+    this->addMessage(MessageBuilder::makeShadowChatMessage(
+                         login, text, this, nickColor, messageId, thread,
+                         parent),
+                     MessageContext::Original);
 }
 
 bool TwitchChannel::isMod() const

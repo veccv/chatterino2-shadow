@@ -17,9 +17,13 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace chatterino {
+
+enum class ShadowConnectionState : std::uint8_t;
 
 class Split;
 class EmotePopup;
@@ -90,8 +94,9 @@ public:
      * This method is used to update the text of the timeout and slow mode timer
      */
     void setSendWaitStatus(const QString &text) const;
-    void setRestrictionStatus(const QString &text) const;
+    void setShadowConnectionStatus(std::optional<ShadowConnectionState> state);
     QString restrictionStatus() const;
+    std::optional<ShadowConnectionState> shadowConnectionStatus() const;
 
     void triggerSelfMessageReceived();
 
@@ -183,6 +188,7 @@ protected:
 
     MessagePtr replyTarget_ = nullptr;
     bool enableInlineReplying_;
+    std::optional<ShadowConnectionState> shadowConnectionState_;
 
     pajlada::Signals::SignalHolder managedConnections_;
     QStringList prevMsg_;

@@ -192,10 +192,11 @@ protected:
 
 private:
     void onMessageSendRequested(const std::shared_ptr<TwitchChannel> &channel,
-                                const QString &message, bool &sent);
+                                const QString &message, bool &sent,
+                                bool allowShadowFallback);
     void onReplySendRequested(const std::shared_ptr<TwitchChannel> &channel,
                               const QString &message, const QString &replyId,
-                              bool &sent);
+                              bool &sent, bool allowShadowFallback);
 
     bool prepareToSend(const std::shared_ptr<TwitchChannel> &channel);
 

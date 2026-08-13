@@ -74,6 +74,18 @@ using namespace std::chrono_literals;
 
 const QColor AUTOMOD_USER_COLOR{"blue"};
 
+void appendResourceUserBadge(MessageBuilder *builder, const QPixmap &pixmap,
+                             const QString &tooltip)
+{
+    builder->emplace<BadgeElement>(
+        std::make_shared<Emote>(Emote{
+            .name = EmoteName{},
+            .images = ImageSet{Image::fromResourcePixmap(pixmap, 18.F / 32.F)},
+            .tooltip = Tooltip{tooltip},
+        }),
+        MessageElementFlag::AlwaysShow);
+}
+
 const QString regexHelpString("(\\w+)[.,!?;:]*?$");
 
 // matches a mention with punctuation at the end, like "@username," or "@username!!!" where capture group would return "username"
@@ -573,10 +585,10 @@ MessagePtr makeSystemMessage(const QString &text, const QTime &time)
     return MessageBuilder(systemMessage, text, time).release();
 }
 
-MessagePtr MessageBuilder::makeShadowChatMessage(const QString &login,
-                                                 const QString &text,
-                                                 TwitchChannel *channel,
-                                                 const QColor &usernameColor)
+MessagePtr MessageBuilder::makeShadowChatMessage(
+    const QString &login, const QString &text, TwitchChannel *channel,
+    const QColor &usernameColor, const QString &id,
+    const std::shared_ptr<MessageThread> &thread, const MessagePtr &parent)
 {
     MessageBuilder builder;
     if (usernameColor.isValid())
@@ -585,6 +597,9 @@ MessagePtr MessageBuilder::makeShadowChatMessage(const QString &login,
         builder.message().usernameColor = usernameColor;
     }
 
+    builder->id = id;
+    builder->serverReceivedTime = QDateTime::currentDateTime();
+    builder.attachReplyThread(thread, parent);
     builder.emplace<TimestampElement>();
     builder.appendShadowMark();
 
@@ -604,6 +619,12 @@ MessagePtr MessageBuilder::makeShadowChatMessage(const QString &login,
     builder->messageText = text;
     builder->searchText = QStringLiteral("Shadow user %1: %2").arg(login, text);
     builder->flags.set(MessageFlag::DoNotTriggerNotification);
+
+    if (!builder->id.isEmpty())
+    {
+        builder.appendReplyButton(thread);
+    }
+
     return builder.release();
 }
 
@@ -1822,6 +1843,7 @@ std::pair<MessagePtrMut, HighlightAlert> MessageBuilder::makeIrcMessage(
         builder.emplace<TwitchModerationElement>();
     }
 
+    builder.appendNormalUserMark();
     builder.appendTwitchBadges(tags, twitchChannel);
 
     builder.appendChatterinoBadges(userID);
@@ -1887,24 +1909,7 @@ std::pair<MessagePtrMut, HighlightAlert> MessageBuilder::makeIrcMessage(
 
     if (!args.isReceivedWhisper && tags.getOrEmpty("msg-id") != "announcement")
     {
-        if (thread)
-        {
-            auto &img = getResources().buttons.replyThreadDark;
-            builder
-                .emplace<CircularImageElement>(
-                    Image::fromResourcePixmap(img, 0.15), 2, Qt::gray,
-                    MessageElementFlag::ReplyButton)
-                ->setLink({Link::ViewThread, thread->rootId()});
-        }
-        else
-        {
-            auto &img = getResources().buttons.replyDark;
-            builder
-                .emplace<CircularImageElement>(
-                    Image::fromResourcePixmap(img, 0.15), 2, Qt::gray,
-                    MessageElementFlag::ReplyButton)
-                ->setLink({Link::ReplyToMessage, builder->id});
-        }
+        builder.appendReplyButton(thread);
     }
 
     return {builder.release(), highlight};
@@ -2216,6 +2221,85 @@ TwitchChannel *MessageBuilder::parseSharedChatInfo(Communi::TagsRef tags,
     return twitchChannel;
 }
 
+void MessageBuilder::attachReplyThread(
+    const std::shared_ptr<MessageThread> &thread, const MessagePtr &parent)
+{
+    if (!thread)
+    {
+        return;
+    }
+
+    this->message().replyThread = thread;
+    this->message().replyParent = parent;
+    thread->addToThread(std::weak_ptr{this->message_});
+
+    if (thread->subscribed())
+    {
+        this->message().flags.set(MessageFlag::SubscribedThread);
+    }
+
+    this->message().flags.set(MessageFlag::ReplyMessage);
+
+    MessagePtr threadRoot;
+    if (!parent)
+    {
+        threadRoot = thread->root();
+    }
+    else
+    {
+        threadRoot = parent;
+    }
+
+    QString usernameText = stylizeUsername(threadRoot->loginName, *threadRoot);
+
+    this->emplace<ReplyCurveElement>();
+
+    this->emplace<TextElement>(
+            "Replying to", MessageElementFlag::RepliedMessage,
+            MessageColor::System, FontStyle::ChatMediumSmall)
+        ->setLink({Link::ViewThread, thread->rootId()});
+
+    this->emplace<TextElement>(
+            "@" + usernameText +
+                (threadRoot->flags.has(MessageFlag::Action) ? "" : ":"),
+            MessageElementFlag::RepliedMessage, threadRoot->usernameColor,
+            FontStyle::ChatMediumSmall)
+        ->setLink({Link::UserInfo, threadRoot->displayName});
+
+    MessageColor color = MessageColor::Text;
+    if (threadRoot->flags.has(MessageFlag::Action))
+    {
+        color = threadRoot->usernameColor;
+    }
+    this->emplace<SingleLineTextElement>(
+            threadRoot->messageText,
+            MessageElementFlags({MessageElementFlag::RepliedMessage,
+                                 MessageElementFlag::Text}),
+            color, FontStyle::ChatMediumSmall)
+        ->setLink({Link::ViewThread, thread->rootId()});
+}
+
+void MessageBuilder::appendReplyButton(
+    const std::shared_ptr<MessageThread> &thread)
+{
+    if (thread)
+    {
+        auto &img = getResources().buttons.replyThreadDark;
+        this->emplace<CircularImageElement>(
+                Image::fromResourcePixmap(img, 0.15), 2, Qt::gray,
+                MessageElementFlag::ReplyButton)
+            ->setLink({Link::ViewThread, thread->rootId()});
+    }
+    else
+    {
+        auto &img = getResources().buttons.replyDark;
+        this->emplace<CircularImageElement>(
+                Image::fromResourcePixmap(img, 0.15), 2, Qt::gray,
+                MessageElementFlag::ReplyButton)
+            ->setLink({Link::ReplyToMessage, this->message().id});
+    }
+}
+
 void MessageBuilder::parseThread(const QString &messageContent,
                                  Communi::TagsRef tags, const Channel *channel,
                                  const std::shared_ptr<MessageThread> &thread,
@@ -2223,58 +2307,7 @@ void MessageBuilder::parseThread(const QString &messageContent,
 {
     if (thread)
     {
-        // set references
-        this->message().replyThread = thread;
-        this->message().replyParent = parent;
-        thread->addToThread(std::weak_ptr{this->message_});
-
-        if (thread->subscribed())
-        {
-            this->message().flags.set(MessageFlag::SubscribedThread);
-        }
-
-        // enable reply flag
-        this->message().flags.set(MessageFlag::ReplyMessage);
-
-        MessagePtr threadRoot;
-        if (!parent)
-        {
-            threadRoot = thread->root();
-        }
-        else
-        {
-            threadRoot = parent;
-        }
-
-        QString usernameText =
-            stylizeUsername(threadRoot->loginName, *threadRoot);
-
-        this->emplace<ReplyCurveElement>();
-
-        // construct reply elements
-        this->emplace<TextElement>(
-                "Replying to", MessageElementFlag::RepliedMessage,
-                MessageColor::System, FontStyle::ChatMediumSmall)
-            ->setLink({Link::ViewThread, thread->rootId()});
-
-        this->emplace<TextElement>(
-                "@" + usernameText +
-                    (threadRoot->flags.has(MessageFlag::Action) ? "" : ":"),
-                MessageElementFlag::RepliedMessage, threadRoot->usernameColor,
-                FontStyle::ChatMediumSmall)
-            ->setLink({Link::UserInfo, threadRoot->displayName});
-
-        MessageColor color = MessageColor::Text;
-        if (threadRoot->flags.has(MessageFlag::Action))
-        {
-            color = threadRoot->usernameColor;
-        }
-        this->emplace<SingleLineTextElement>(
-                threadRoot->messageText,
-                MessageElementFlags({MessageElementFlag::RepliedMessage,
-                                     MessageElementFlag::Text}),
-                color, FontStyle::ChatMediumSmall)
-            ->setLink({Link::ViewThread, thread->rootId()});
+        this->attachReplyThread(thread, parent);
     }
     else if (tags.has("reply-parent-msg-id"))
     {
@@ -2657,14 +2690,14 @@ void MessageBuilder::appendTwitchBadges(Communi::TagsRef tags,
 void MessageBuilder::appendShadowMark()
 {
     this->message().flags.set(MessageFlag::ShadowMessage);
-    this->emplace<BadgeElement>(
-        std::make_shared<Emote>(Emote{
-            .name = EmoteName{},
-            .images = ImageSet{Image::fromResourcePixmap(
-                getResources().twitch.shadowUser, 18.F / 32.F)},
-            .tooltip = Tooltip{QStringLiteral("Shadow user")},
-        }),
-        MessageElementFlag::AlwaysShow);
+    appendResourceUserBadge(this, getResources().twitch.shadowUser,
+                            QStringLiteral("Shadow user"));
+}
+
+void MessageBuilder::appendNormalUserMark()
+{
+    appendResourceUserBadge(this, getResources().twitch.haHAA,
+                            QStringLiteral("normal chat user"));
 }
 
 void MessageBuilder::appendChatterinoBadges(const QString &userID)
