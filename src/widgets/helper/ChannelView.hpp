@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common/FlagsEnum.hpp"
+#include "common/WindowDescriptors.hpp"
 #include "messages/layouts/MessageLayoutContext.hpp"
 #include "messages/LimitedQueue.hpp"
 #include "messages/MessageFlag.hpp"
@@ -68,6 +69,8 @@ enum class FromTwitchLinkOpenChannelIn {
 };
 
 using SteadyClock = std::chrono::steady_clock;
+
+bool messagePassesShadowView(MessageFlags flags, ShadowViewMode mode);
 
 class ChannelView final : public BaseWidget
 {
@@ -163,6 +166,7 @@ public:
     ///
     /// @see #underlyingChannel()
     void setChannel(const ChannelPtr &underlyingChannel);
+    void refreshFilteredMessages();
 
     void setFilters(const QList<QUuid> &ids);
     QList<QUuid> getFilterIds() const;

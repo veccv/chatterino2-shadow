@@ -6,6 +6,7 @@
 
 #include "common/Args.hpp"
 #include "common/Channel.hpp"
+#include "common/Env.hpp"
 #include "common/Version.hpp"
 #include "controllers/accounts/AccountController.hpp"
 #include "controllers/commands/Command.hpp"
@@ -43,6 +44,7 @@
 #include "providers/ffz/FfzBadges.hpp"
 #include "providers/seventv/SeventvBadges.hpp"
 #include "providers/seventv/SeventvEventAPI.hpp"
+#include "providers/shadow/ShadowRelay.hpp"
 #include "providers/twitch/ChannelPointReward.hpp"
 #include "providers/twitch/PubSubManager.hpp"
 #include "providers/twitch/PubSubMessages.hpp"
@@ -187,6 +189,7 @@ Application::Application(Settings &_settings, const Paths &paths,
     , ffzEmotes(new FfzEmotes)
     , seventvEmotes(new SeventvEmotes)
     , seventvEventAPI(makeSeventvEventAPI(_settings))
+    , shadowRelay(new ShadowRelay(Env::get().shadowRelayUrl))
     , linkResolver(new LinkResolver)
     , streamerMode(new StreamerMode)
     , twitchUsers(new TwitchUsers)
@@ -575,6 +578,12 @@ SeventvEventAPI *Application::getSeventvEventAPI()
     // seventvEventAPI may be nullptr if it's not enabled
 
     return this->seventvEventAPI.get();
+}
+
+ShadowRelay *Application::getShadowRelay()
+{
+    assertInGuiThread();
+    return this->shadowRelay.get();
 }
 
 pronouns::Pronouns *Application::getPronouns()

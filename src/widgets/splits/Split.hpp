@@ -6,6 +6,7 @@
 
 #include "common/Aliases.hpp"
 #include "common/Channel.hpp"
+#include "common/WindowDescriptors.hpp"
 #include "widgets/BaseWidget.hpp"
 #include "widgets/splits/SplitCommon.hpp"
 
@@ -68,6 +69,11 @@ public:
 
     void setModerationMode(bool value);
     bool getModerationMode() const;
+
+    void setShadowViewMode(ShadowViewMode mode);
+    ShadowViewMode getShadowViewMode() const;
+
+    void updateRestrictionStatus();
 
     std::optional<bool> checkSpellingOverride() const;
     void setCheckSpellingOverride(std::optional<bool> override);
@@ -164,6 +170,7 @@ private:
     IndirectChannel channel_;
 
     bool moderationMode_{};
+    ShadowViewMode shadowViewMode_{ShadowViewMode::Both};
     bool isTopRightSplit_{};
 
     bool isMouseOver_{};

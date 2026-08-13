@@ -11,6 +11,7 @@
 
 #include <IrcMessage>
 #include <IrcTagsRef>
+#include <QColor>
 #include <QRegularExpression>
 #include <QString>
 #include <QTime>
@@ -260,6 +261,11 @@ public:
     static MessagePtrMut makeCurrentPinnedMessage(
         const TwitchChannel &channel, const HelixPinnedChatMessage &pin);
 
+    static MessagePtr makeShadowChatMessage(const QString &login,
+                                            const QString &text,
+                                            TwitchChannel *channel = nullptr,
+                                            const QColor &usernameColor = {});
+
 private:
     struct TextState {
         TwitchChannel *twitchChannel = nullptr;
@@ -322,6 +328,7 @@ private:
 
     void appendTwitchBadges(Communi::TagsRef tags,
                             TwitchChannel *twitchChannel);
+    void appendShadowMark();
     void appendChatterinoBadges(const QString &userID);
     void appendFfzBadges(TwitchChannel *twitchChannel, const QString &userID);
     void appendBttvBadges(const QString &userID);

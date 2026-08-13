@@ -258,6 +258,11 @@ public:
         return nullptr;
     }
 
+    ShadowRelay *getShadowRelay() override
+    {
+        return nullptr;
+    }
+
     ILinkResolver *getLinkResolver() override
     {
         assert(false && "EmptyApplication::getLinkResolver was called without "
