@@ -454,6 +454,10 @@ set(SOURCE_FILES
         providers/seventv/eventapi/Subscription.cpp
         providers/seventv/eventapi/Subscription.hpp
 
+        providers/shadow/ShadowProtocol.hpp
+        providers/shadow/ShadowRelay.cpp
+        providers/shadow/ShadowRelay.hpp
+
         providers/twitch/ChannelPointReward.cpp
         providers/twitch/ChannelPointReward.hpp
         providers/twitch/IrcMessageHandler.cpp

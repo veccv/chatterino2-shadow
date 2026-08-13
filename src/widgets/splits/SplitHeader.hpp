@@ -40,6 +40,7 @@ public:
     // Invoked when SplitHeader should update anything refering to a TwitchChannel's mode
     // has changed (e.g. sub mode toggled)
     void updateRoomModes();
+    void updateShadowViewButton();
 
 protected:
     void scaleChangedEvent(float scale) override;
@@ -80,6 +81,7 @@ private:
     Label *titleLabel_{};
 
     LabelButton *modeButton_{};
+    LabelButton *shadowViewButton_{};
     QAction *modeActionSetEmote{};
     QAction *modeActionSetSub{};
     QAction *modeActionSetSlow{};

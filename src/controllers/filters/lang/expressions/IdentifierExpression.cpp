@@ -330,6 +330,10 @@ const AccessorMap &accessorMap()
             u"flags.announcement"_s,
             {Type::Bool, flagAccessor<MessageFlag::Announcement>},
         },
+        {
+            u"flags.shadow"_s,
+            {Type::Bool, flagAccessor<MessageFlag::ShadowMessage>},
+        },
 
         // message.*
         {

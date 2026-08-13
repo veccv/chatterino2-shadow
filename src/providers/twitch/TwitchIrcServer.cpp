@@ -26,9 +26,11 @@
 #include "providers/twitch/PubSubManager.hpp"
 #include "providers/twitch/TwitchAccount.hpp"
 #include "providers/twitch/TwitchChannel.hpp"
+#include "providers/twitch/TwitchCommon.hpp"
 #include "singletons/Settings.hpp"
 #include "singletons/WindowManager.hpp"
 #include "util/PostToThread.hpp"
+#include "util/QStringHash.hpp"
 #include "util/RatelimitBucket.hpp"
 #include "util/Twitch.hpp"
 
@@ -217,6 +219,29 @@ TwitchIrcServer::TwitchIrcServer()
     this->signalHolder.managedConnect(this->readConnection_->heartbeat, [this] {
         this->markChannelsConnected();
     });
+
+    this->ghostConnection_.reset(new IrcConnection);
+    this->ghostConnection_->moveToThread(QCoreApplication::instance()->thread());
+    QObject::connect(this->ghostConnection_.get(),
+                     &Communi::IrcConnection::messageReceived, this,
+                     [this](auto msg) {
+                         this->ghostConnectionMessageReceived(msg);
+                     });
+    QObject::connect(this->ghostConnection_.get(),
+                     &Communi::IrcConnection::privateMessageReceived, this,
+                     [this](auto msg) {
+                         this->privateMessageReceived(msg);
+                     });
+    QObject::connect(this->ghostConnection_.get(),
+                     &Communi::IrcConnection::connected, this, [this] {
+                         this->onGhostConnected();
+                     });
+    this->signalHolder.managedConnect(
+        this->ghostConnection_->connectionLost, [this](bool timeout) {
+            qCDebug(chatterinoIrc)
+                << "Ghost connection reconnect requested. Timeout:" << timeout;
+            this->ghostConnection_->smartReconnect();
+        });
 }
 
 void TwitchIrcServer::initialize()
@@ -1149,6 +1174,12 @@ void TwitchIrcServer::connect()
                                ConnectionType::Write);
     this->initializeConnection(this->readConnection_.get(),
                                ConnectionType::Read);
+    this->forEachChannel([this](const ChannelPtr &chan) {
+        if (auto *tc = dynamic_cast<TwitchChannel *>(chan.get()))
+        {
+            this->updateGhostWatch(tc);
+        }
+    });
 }
 
 void TwitchIrcServer::disconnect()
@@ -1157,6 +1188,7 @@ void TwitchIrcServer::disconnect()
 
     this->readConnection_->close();
     this->writeConnection_->close();
+    this->ghostConnection_->close();
 }
 
 void TwitchIrcServer::sendMessage(const QString &channelName,
@@ -1209,6 +1241,11 @@ ChannelPtr TwitchIrcServer::getOrAddChannel(const QString &dirtyChannelName)
                 {
                     this->readConnection_->sendRaw("PART #" + channelName);
                 }
+            }
+            this->ghostRooms_.erase(channelName);
+            if (this->ghostConnection_ && this->ghostConnection_->isConnected())
+            {
+                this->sendGhostPart(channelName);
             }
         });
 
@@ -1269,6 +1306,138 @@ void TwitchIrcServer::open(ConnectionType type)
     {
         this->readConnection_->open();
     }
+    if (type == ConnectionType::Ghost)
+    {
+        this->ghostConnection_->open();
+    }
+}
+
+void TwitchIrcServer::updateGhostWatch(TwitchChannel *channel)
+{
+    if (channel == nullptr)
+    {
+        return;
+    }
+
+    const auto name = channel->getName();
+    auto account = getApp()->getAccounts()->twitch.getCurrent();
+    const bool shouldWatch =
+        channel->restriction() == ChannelRestriction::Banned &&
+        account && !account->isAnon();
+
+    if (shouldWatch)
+    {
+        auto [it, inserted] = this->ghostRooms_.insert(name);
+        (void)it;
+        this->ensureGhostConnected();
+        if (inserted && this->ghostConnection_ &&
+            this->ghostConnection_->isConnected())
+        {
+            this->sendGhostJoin(name);
+        }
+        return;
+    }
+
+    if (this->ghostRooms_.erase(name) != 0)
+    {
+        this->sendGhostPart(name);
+    }
+    if (this->ghostRooms_.empty())
+    {
+        this->stopGhostConnection();
+    }
+}
+
+void TwitchIrcServer::ensureGhostConnected()
+{
+    if (this->ghostRooms_.empty() || !this->ghostConnection_)
+    {
+        return;
+    }
+    if (this->ghostConnection_->isConnected())
+    {
+        return;
+    }
+    this->initializeGhostConnection();
+}
+
+void TwitchIrcServer::initializeGhostConnection()
+{
+    auto *connection = this->ghostConnection_.get();
+    QStringList caps{u"twitch.tv/tags"_s, u"twitch.tv/commands"_s,
+                     u"twitch.tv/membership"_s};
+    connection->network()->setSkipCapabilityValidation(true);
+    connection->network()->setRequestedCapabilities(caps);
+
+    const QString username = QLatin1String(ANONYMOUS_USERNAME);
+    connection->setUserName(username);
+    connection->setNickName(username);
+    connection->setRealName(username);
+    connection->setPassword({});
+
+    connection->setHost(Env::get().twitchServerHost);
+    connection->setPort(Env::get().twitchServerPort);
+    connection->setSecure(Env::get().twitchServerSecure);
+
+    this->open(ConnectionType::Ghost);
+}
+
+void TwitchIrcServer::stopGhostConnection()
+{
+    if (this->ghostConnection_)
+    {
+        this->ghostConnection_->close();
+    }
+}
+
+void TwitchIrcServer::onGhostConnected()
+{
+    for (const auto &name : this->ghostRooms_)
+    {
+        this->sendGhostJoin(name);
+    }
+}
+
+void TwitchIrcServer::ghostConnectionMessageReceived(
+    Communi::IrcMessage *message)
+{
+    if (message->type() == Communi::IrcMessage::Type::Private)
+    {
+        return;
+    }
+
+    const QString &command = message->command();
+    if (command == u"USERSTATE"_s)
+    {
+        return;
+    }
+    if ((command == u"JOIN"_s || command == u"PART"_s) &&
+        message->nick().compare(QLatin1String(ANONYMOUS_USERNAME),
+                                Qt::CaseInsensitive) == 0)
+    {
+        return;
+    }
+
+    this->readConnectionMessageReceived(message);
+}
+
+void TwitchIrcServer::sendGhostJoin(const QString &channelName)
+{
+    if (!this->ghostConnection_ || channelName.startsWith(u'/'))
+    {
+        return;
+    }
+    this->ghostConnection_->sendRaw("JOIN #" + channelName);
+}
+
+void TwitchIrcServer::sendGhostPart(const QString &channelName)
+{
+    if (!this->ghostConnection_ || !this->ghostConnection_->isConnected() ||
+        channelName.startsWith(u'/'))
+    {
+        return;
+    }
+    this->ghostConnection_->sendRaw("PART #" + channelName);
 }
 
 }  // namespace chatterino

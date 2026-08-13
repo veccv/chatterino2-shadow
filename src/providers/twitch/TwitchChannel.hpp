@@ -26,6 +26,7 @@
 #include <QRegularExpression>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -87,6 +88,12 @@ namespace detail {
 bool isUnknownCommand(const QString &text);
 
 }  // namespace detail
+
+enum class ChannelRestriction : std::uint8_t {
+    None,
+    TimedOut,
+    Banned,
+};
 
 class TwitchChannel final : public Channel, public ChannelChatters
 {
@@ -183,6 +190,10 @@ public:
     bool canSendMessage() const override;
     void sendMessage(const QString &message) override;
     void sendReply(const QString &message, const QString &replyId);
+    /// If Banned or TimedOut, publish to shadow and skip Twitch.
+    /// Returns true when the Twitch send path must not run.
+    bool tryInterceptShadowSend(const QString &parsedMessage, bool &sent);
+    void addShadowChatLine(const QString &login, const QString &text);
     bool isMod() const override;
     bool isVip() const;
     bool isStaff() const;
@@ -357,6 +368,8 @@ public:
 
     pajlada::Signals::Signal<const QString &> sendWaitUpdate;
 
+    pajlada::Signals::NoArgSignal restrictionChanged;
+
     pajlada::Signals::Signal<const std::vector<HelixMinimalUser> &>
         sharedChatStatusChanged;
 
@@ -402,6 +415,11 @@ public:
      * to wait before they can send again.
      */
     void setSendWait(int seconds);
+
+    ChannelRestriction restriction() const;
+    void setRestriction(ChannelRestriction restriction);
+    /// Sets TimedOut for @a seconds, then clears to None. Distinct from slow-mode sendWait.
+    void setTimedOut(int seconds);
 
     bool isLoadingRecentMessages() const;
 
@@ -479,6 +497,7 @@ private:
      */
     void updateSevenTVActivity();
     void listenSevenTVCosmetics() const;
+    void listenShadowRelay() const;
 
     /**
      * @brief Sets the live status of this Twitch channel
@@ -680,6 +699,9 @@ private:
     QTimer sendWaitTimer_;
     // Timepoint at which the user can send messages again
     std::optional<std::chrono::steady_clock::time_point> sendWaitEnd_;
+
+    ChannelRestriction restriction_{ChannelRestriction::None};
+    QTimer restrictionClearTimer_;
 };
 
 }  // namespace chatterino

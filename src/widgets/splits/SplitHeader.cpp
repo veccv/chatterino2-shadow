@@ -378,6 +378,10 @@ void SplitHeader::initializeLayout()
             w->hide();
             w->setMenu(this->createChatModeMenu());
         }),
+        this->shadowViewButton_ = makeWidget<LabelButton>([&](auto w) {
+            w->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
+            w->setPadding({4, 0});
+        }),
         // pin indicator
         this->pinButton_,
         // moderator
@@ -427,6 +431,28 @@ void SplitHeader::initializeLayout()
                      [this]() {
                          this->split_->openChatterList();
                      });
+
+    QObject::connect(this->shadowViewButton_, &Button::leftClicked, this,
+                     [this]() {
+                         auto mode = this->split_->getShadowViewMode();
+                         switch (mode)
+                         {
+                             case ShadowViewMode::Both:
+                                 this->split_->setShadowViewMode(
+                                     ShadowViewMode::Normal);
+                                 break;
+                             case ShadowViewMode::Normal:
+                                 this->split_->setShadowViewMode(
+                                     ShadowViewMode::Shadow);
+                                 break;
+                             case ShadowViewMode::Shadow:
+                                 this->split_->setShadowViewMode(
+                                     ShadowViewMode::Both);
+                                 break;
+                         }
+                     });
+
+    this->updateShadowViewButton();
 
     QObject::connect(this->pinButton_, &Button::leftClicked, this, [this]() {
         this->split_->togglePinnedBanner();
@@ -851,6 +877,33 @@ void SplitHeader::updateRoomModes()
     else
     {
         this->modeButton_->hide();
+    }
+}
+
+void SplitHeader::updateShadowViewButton()
+{
+    if (this->shadowViewButton_ == nullptr)
+    {
+        return;
+    }
+
+    switch (this->split_->getShadowViewMode())
+    {
+        case ShadowViewMode::Both:
+            this->shadowViewButton_->setText(QStringLiteral("Both"));
+            this->shadowViewButton_->setToolTip(
+                QStringLiteral("View: Twitch and shadow chat"));
+            break;
+        case ShadowViewMode::Normal:
+            this->shadowViewButton_->setText(QStringLiteral("Chat"));
+            this->shadowViewButton_->setToolTip(
+                QStringLiteral("View: Twitch chat only"));
+            break;
+        case ShadowViewMode::Shadow:
+            this->shadowViewButton_->setText(QStringLiteral("Shadow"));
+            this->shadowViewButton_->setToolTip(
+                QStringLiteral("View: shadow chat only"));
+            break;
     }
 }
 

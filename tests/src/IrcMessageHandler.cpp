@@ -702,3 +702,130 @@ TEST_P(TestIrcMessageHandlerP, CloneElements)
         }
     }
 }
+
+class IrcRestriction : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        this->app = std::make_unique<MockApplication>(u"{}"_s);
+        this->channel = std::make_shared<TwitchChannel>(u"pajlada"_s);
+        this->app->twitch.mockChannels.emplace(u"pajlada"_s, this->channel);
+    }
+
+    void TearDown() override
+    {
+        this->channel.reset();
+        this->app.reset();
+    }
+
+    void handle(const QByteArray &raw)
+    {
+        auto *ircMessage = Communi::IrcMessage::fromData(raw, nullptr);
+        ASSERT_NE(ircMessage, nullptr);
+        auto command = ircMessage->command();
+        auto &handler = IrcMessageHandler::instance();
+        if (command == u"CLEARCHAT"_s)
+        {
+            handler.handleClearChatMessage(ircMessage);
+        }
+        else if (command == u"PART"_s)
+        {
+            handler.handlePartMessage(ircMessage);
+        }
+        else if (command == u"JOIN"_s)
+        {
+            handler.handleJoinMessage(ircMessage);
+        }
+        else if (command == u"NOTICE"_s)
+        {
+            auto *notice =
+                dynamic_cast<Communi::IrcNoticeMessage *>(ircMessage);
+            ASSERT_NE(notice, nullptr);
+            handler.handleNoticeMessage(notice);
+        }
+        else
+        {
+            FAIL() << "unhandled command " << command;
+        }
+        delete ircMessage;
+    }
+
+    std::unique_ptr<MockApplication> app;
+    std::shared_ptr<TwitchChannel> channel;
+};
+
+TEST_F(IrcRestriction, SelfTimeoutSetsTimedOut)
+{
+    this->handle(
+        "@ban-duration=5;room-id=1 :tmi.twitch.tv CLEARCHAT #pajlada "
+        "justinfan64537");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::TimedOut);
+}
+
+TEST_F(IrcRestriction, OtherTimeoutDoesNotRestrict)
+{
+    this->handle(
+        "@ban-duration=5;room-id=1 :tmi.twitch.tv CLEARCHAT #pajlada "
+        "someoneelse");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::None);
+}
+
+TEST_F(IrcRestriction, SelfPermabanClearchatSetsBanned)
+{
+    this->handle(":tmi.twitch.tv CLEARCHAT #pajlada justinfan64537");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::Banned);
+}
+
+TEST_F(IrcRestriction, PermabanNoticeSetsBanned)
+{
+    this->handle(
+        ":tmi.twitch.tv NOTICE #pajlada :You are permanently banned from "
+        "talking in pajlada.");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::Banned);
+}
+
+TEST_F(IrcRestriction, SelfPartSetsBanned)
+{
+    auto before = this->app->accounts.twitch.getCurrent()->getUserName();
+    this->handle(
+        ":justinfan64537!justinfan64537@justinfan64537.tmi.twitch.tv PART "
+        "#pajlada");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::Banned);
+    ASSERT_EQ(this->app->accounts.twitch.getCurrent()->getUserName(), before);
+}
+
+TEST_F(IrcRestriction, SelfJoinClearsBanned)
+{
+    this->channel->setRestriction(ChannelRestriction::Banned);
+    this->handle(
+        ":justinfan64537!justinfan64537@justinfan64537.tmi.twitch.tv JOIN "
+        "#pajlada");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::None);
+}
+
+TEST_F(IrcRestriction, SelfJoinDoesNotClearTimedOut)
+{
+    this->channel->setTimedOut(30);
+    this->handle(
+        ":justinfan64537!justinfan64537@justinfan64537.tmi.twitch.tv JOIN "
+        "#pajlada");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::TimedOut);
+}
+
+TEST_F(IrcRestriction, TimedOutNoticeSetsTimedOut)
+{
+    this->handle(
+        "@msg-id=msg_timedout :tmi.twitch.tv NOTICE #pajlada :You are timed "
+        "out for 8 more seconds.");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::TimedOut);
+}
+
+TEST_F(IrcRestriction, SlowModeNoticeDoesNotSetTimedOut)
+{
+    this->handle(
+        "@msg-id=msg_slowmode :tmi.twitch.tv NOTICE #pajlada :This room is in "
+        "slow mode and you are sending messages too quickly. You will be able "
+        "to talk again in 10 seconds.");
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::None);
+}

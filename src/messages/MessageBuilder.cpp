@@ -553,6 +553,24 @@ MessagePtr makeSystemMessage(const QString &text, const QTime &time)
     return MessageBuilder(systemMessage, text, time).release();
 }
 
+MessagePtr MessageBuilder::makeShadowChatMessage(const QString &login,
+                                                 const QString &text)
+{
+    MessageBuilder builder;
+    builder.emplace<TimestampElement>();
+    builder.appendShadowMark();
+    builder.emplace<TextElement>(login, MessageElementFlag::Username)
+        ->setLink({Link::UserInfo, login});
+    builder.emplace<TextElement>(u":"_s, MessageElementFlag::Username);
+    builder.emplace<TextElement>(text, MessageElementFlag::Text);
+    builder->loginName = login;
+    builder->displayName = login;
+    builder->messageText = text;
+    builder->searchText = QStringLiteral("[shadow] %1: %2").arg(login, text);
+    builder->flags.set(MessageFlag::DoNotTriggerNotification);
+    return builder.release();
+}
+
 MessageBuilder::MessageBuilder()
     : message_(std::make_shared<Message>())
 {
@@ -2598,6 +2616,17 @@ void MessageBuilder::appendTwitchBadges(Communi::TagsRef tags,
 
     auto badgeInfos = parseBadgeInfoTag(tags);
     appendBadges(this, badges, badgeInfos, twitchChannel);
+}
+
+void MessageBuilder::appendShadowMark()
+{
+    this->message().flags.set(MessageFlag::ShadowMessage);
+    this->emplace<TextElement>(
+            QStringLiteral("[shadow]"),
+            MessageElementFlags{MessageElementFlag::AlwaysShow,
+                                MessageElementFlag::Text},
+            MessageColor::System)
+        ->setTooltip(QStringLiteral("Shadow chat"));
 }
 
 void MessageBuilder::appendChatterinoBadges(const QString &userID)

@@ -162,3 +162,23 @@ INSTANTIATE_TEST_SUITE_P(
             "",
             // Expected text after replying to forsen
             "@forsen ")));
+
+TEST(SplitInputRestriction, StatusDistinctFromSendWait)
+{
+    MockApplication app;
+    auto *split = new Split(nullptr);
+    SplitInput input(split);
+
+    ASSERT_TRUE(input.restrictionStatus().isEmpty());
+    input.setRestrictionStatus(QStringLiteral("Sends go to shadow chat"));
+    ASSERT_EQ(input.restrictionStatus(),
+              QStringLiteral("Sends go to shadow chat"));
+    input.setSendWaitStatus(QStringLiteral("10s"));
+    ASSERT_EQ(input.restrictionStatus(),
+              QStringLiteral("Sends go to shadow chat"));
+    input.setRestrictionStatus(QStringLiteral("Shadow chat disconnected"));
+    ASSERT_EQ(input.restrictionStatus(),
+              QStringLiteral("Shadow chat disconnected"));
+    input.setRestrictionStatus({});
+    ASSERT_TRUE(input.restrictionStatus().isEmpty());
+}

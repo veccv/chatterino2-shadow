@@ -11,6 +11,7 @@
 #include "controllers/highlights/HighlightController.hpp"
 #include "messages/Message.hpp"
 #include "messages/MessageBuilder.hpp"
+#include "widgets/helper/ChannelView.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/Channel.hpp"
 #include "mocks/ChatterinoBadges.hpp"
@@ -172,6 +173,7 @@ TEST(Filters, Validity)
         {R".("abc" + 123 == "abc123").", true},
         {R".(123 + "abc" == "hello").", false},
         {R".(flags.reply && flags.automod).", true},
+        {R".(flags.shadow).", true},
         {R".(unknown.identifier).", false},
         {R".(10 startswith 1).", false},
         {R".(10 startswith "").", false},
@@ -428,4 +430,25 @@ TEST_F(FiltersF, ExpressionDebug)
             << "filter->filterString() on '" << input << "' should be '"
             << filterString << "', but got '" << actualFilterString << "'";
     }
+}
+
+TEST(ShadowView, MessagePasses)
+{
+    MessageFlags twitch;
+    MessageFlags shadow{MessageFlag::ShadowMessage};
+    MessageFlags system{MessageFlag::System};
+    MessageFlags shadowSystem{MessageFlag::ShadowMessage, MessageFlag::System};
+
+    EXPECT_TRUE(messagePassesShadowView(twitch, ShadowViewMode::Both));
+    EXPECT_TRUE(messagePassesShadowView(shadow, ShadowViewMode::Both));
+    EXPECT_TRUE(messagePassesShadowView(system, ShadowViewMode::Both));
+
+    EXPECT_TRUE(messagePassesShadowView(twitch, ShadowViewMode::Normal));
+    EXPECT_FALSE(messagePassesShadowView(shadow, ShadowViewMode::Normal));
+    EXPECT_TRUE(messagePassesShadowView(system, ShadowViewMode::Normal));
+
+    EXPECT_FALSE(messagePassesShadowView(twitch, ShadowViewMode::Shadow));
+    EXPECT_TRUE(messagePassesShadowView(shadow, ShadowViewMode::Shadow));
+    EXPECT_TRUE(messagePassesShadowView(system, ShadowViewMode::Shadow));
+    EXPECT_TRUE(messagePassesShadowView(shadowSystem, ShadowViewMode::Shadow));
 }

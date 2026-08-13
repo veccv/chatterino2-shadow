@@ -12,6 +12,7 @@
 #include "util/Twitch.hpp"
 
 #include <unordered_map>
+#include <unordered_set>
 
 namespace chatterino::mock {
 
@@ -140,6 +141,22 @@ public:
         //
     }
 
+    void updateGhostWatch(TwitchChannel *channel) override
+    {
+        if (channel == nullptr)
+        {
+            return;
+        }
+        if (channel->restriction() == ChannelRestriction::Banned)
+        {
+            this->ghostArmed.insert(channel->getName());
+        }
+        else
+        {
+            this->ghostArmed.erase(channel->getName());
+        }
+    }
+
     ChannelPtr getWhispersChannel() const override
     {
         return this->whispersChannel;
@@ -169,6 +186,7 @@ public:
     QString lastUserThatWhisperedMe{"forsen"};
 
     std::unordered_map<QString, std::weak_ptr<Channel>> mockChannels;
+    std::unordered_set<QString> ghostArmed;
 };
 
 }  // namespace chatterino::mock

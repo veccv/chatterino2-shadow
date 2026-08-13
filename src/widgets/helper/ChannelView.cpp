@@ -1118,6 +1118,14 @@ void ChannelView::setChannel(const ChannelPtr &underlyingChannel)
     }
 }
 
+void ChannelView::refreshFilteredMessages()
+{
+    if (this->underlyingChannel_)
+    {
+        this->setChannel(this->underlyingChannel_);
+    }
+}
+
 void ChannelView::setFilters(const QList<QUuid> &ids)
 {
     this->channelFilters_ = std::make_shared<FilterSet>(ids);
@@ -1140,8 +1148,35 @@ FilterSetPtr ChannelView::getFilterSet() const
     return this->channelFilters_;
 }
 
+bool messagePassesShadowView(MessageFlags flags, ShadowViewMode mode)
+{
+    const bool isShadow = flags.has(MessageFlag::ShadowMessage);
+
+    switch (mode)
+    {
+        case ShadowViewMode::Both:
+            return true;
+        case ShadowViewMode::Normal:
+            return !isShadow;
+        case ShadowViewMode::Shadow:
+            return isShadow || flags.has(MessageFlag::System);
+    }
+
+    return true;
+}
+
 bool ChannelView::shouldIncludeMessage(const MessagePtr &m) const
 {
+    auto mode = ShadowViewMode::Both;
+    if (this->split_ != nullptr)
+    {
+        mode = this->split_->getShadowViewMode();
+    }
+    if (!messagePassesShadowView(m->flags, mode))
+    {
+        return false;
+    }
+
     if (this->channelFilters_)
     {
         if (getSettings()->excludeUserMessagesFromFilter &&
