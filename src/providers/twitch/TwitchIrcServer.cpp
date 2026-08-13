@@ -471,6 +471,10 @@ void TwitchIrcServer::readConnectionMessageReceived(
         // Received USERSTATE upon JOINing a channel
         handler.handleUserStateMessage(message);
     }
+    else if (command == "GLOBALUSERSTATE")
+    {
+        handler.handleGlobalUserStateMessage(message);
+    }
     else if (command == "ROOMSTATE")
     {
         // Received ROOMSTATE upon JOINing a channel
@@ -517,6 +521,10 @@ void TwitchIrcServer::writeConnectionMessageReceived(
     {
         // Received USERSTATE upon sending PRIVMSG messages
         handler.handleUserStateMessage(message);
+    }
+    else if (command == "GLOBALUSERSTATE")
+    {
+        handler.handleGlobalUserStateMessage(message);
     }
     else if (command == "NOTICE")
     {
@@ -1444,7 +1452,7 @@ void TwitchIrcServer::ghostConnectionMessageReceived(
     }
 
     const QString &command = message->command();
-    if (command == u"USERSTATE"_s)
+    if (command == u"USERSTATE"_s || command == u"GLOBALUSERSTATE"_s)
     {
         return;
     }

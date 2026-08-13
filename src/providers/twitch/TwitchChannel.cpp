@@ -108,6 +108,19 @@ constexpr auto MAX_CHATTERS_TO_FETCH = 5000;
 // From Twitch docs - expected size for a badge (1x)
 constexpr QSize BASE_BADGE_SIZE(18, 18);
 
+QString subscriberBadgeValueForTier(const QString &tier)
+{
+    if (tier == u"2000"_s)
+    {
+        return u"2000"_s;
+    }
+    if (tier == u"3000"_s)
+    {
+        return u"3000"_s;
+    }
+    return u"0"_s;
+}
+
 }  // namespace
 
 TwitchChannel::TwitchChannel(const QString &name)
@@ -1091,6 +1104,8 @@ void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
         messageId = generateUuid();
     }
 
+    auto cosmetics = this->cosmeticsForLogin(login);
+
     std::shared_ptr<MessageThread> thread;
     MessagePtr parent;
     if (!replyParentId.isEmpty())
@@ -1111,8 +1126,125 @@ void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
 
     this->addMessage(MessageBuilder::makeShadowChatMessage(
                          login, text, this, nickColor, messageId, thread,
-                         parent),
+                         parent, std::move(cosmetics.badges),
+                         std::move(cosmetics.badgeInfos), cosmetics.userID,
+                         cosmetics.useChannelBadgeSets),
                      MessageContext::Original);
+}
+
+void TwitchChannel::setSelfTwitchBadges(
+    std::vector<TwitchBadge> badges,
+    std::unordered_map<QString, QString> badgeInfos)
+{
+    auto self = this->selfTwitchBadges_.access();
+    self->badges = std::move(badges);
+    self->badgeInfos = std::move(badgeInfos);
+    self->received = true;
+}
+
+void TwitchChannel::setSelfSubscriptionBadge(std::optional<TwitchBadge> badge)
+{
+    this->selfSubscriptionBadge_ = std::move(badge);
+}
+
+void TwitchChannel::refreshBannedSelfBadges()
+{
+    if (getApp()->isTest() ||
+        this->restriction_ != ChannelRestriction::Banned)
+    {
+        return;
+    }
+
+    auto current = getApp()->getAccounts()->twitch.getCurrent();
+    if (current->isAnon() || this->roomId().isEmpty())
+    {
+        return;
+    }
+
+    getHelix()->checkUserSubscription(
+        current->getUserId(), this->roomId(), &this->lifetimeGuard_,
+        [weak = this->weakFromThis()](
+            const std::optional<HelixUserSubscription> &subscription) {
+            auto shared = weak.lock();
+            if (!shared)
+            {
+                return;
+            }
+            if (!subscription)
+            {
+                shared->setSelfSubscriptionBadge(std::nullopt);
+                return;
+            }
+            shared->setSelfSubscriptionBadge(TwitchBadge(
+                QStringLiteral("subscriber"),
+                subscriberBadgeValueForTier(subscription->tier)));
+        },
+        [](const QString &) {
+        });
+}
+
+TwitchChannel::TwitchUserCosmetics TwitchChannel::cosmeticsForLogin(
+    const QString &login) const
+{
+    TwitchUserCosmetics out;
+    auto current = getApp()->getAccounts()->twitch.getCurrent();
+    if (current->getUserName().compare(login, Qt::CaseInsensitive) == 0)
+    {
+        out.userID = current->getUserId();
+        {
+            auto self = this->selfTwitchBadges_.accessConst();
+            if (self->received)
+            {
+                out.badges = self->badges;
+                out.badgeInfos = self->badgeInfos;
+                return out;
+            }
+        }
+    }
+
+    auto snapshot = this->getMessageSnapshot();
+    for (auto i = snapshot.size(); i-- > 0;)
+    {
+        const auto &msg = snapshot[i];
+        if (msg->flags.has(MessageFlag::ShadowMessage) ||
+            msg->flags.has(MessageFlag::System))
+        {
+            continue;
+        }
+        if (msg->loginName.compare(login, Qt::CaseInsensitive) != 0)
+        {
+            continue;
+        }
+        out.badges = msg->twitchBadges;
+        out.badgeInfos = msg->twitchBadgeInfos;
+        out.userID = msg->userID;
+        break;
+    }
+
+    if (out.badges.empty() &&
+        current->getUserName().compare(login, Qt::CaseInsensitive) == 0)
+    {
+        auto cached = current->globalTwitchBadges();
+        out.badges = std::move(cached.badges);
+        out.badgeInfos = std::move(cached.badgeInfos);
+        if (this->selfSubscriptionBadge_)
+        {
+            auto insertAt = out.badges.begin();
+            while (insertAt != out.badges.end() &&
+                   insertAt->flag_ ==
+                       MessageElementFlag::BadgeGlobalAuthority)
+            {
+                ++insertAt;
+            }
+            out.badges.insert(insertAt, *this->selfSubscriptionBadge_);
+        }
+        if (out.userID.isEmpty())
+        {
+            out.userID = current->getUserId();
+        }
+    }
+
+    return out;
 }
 
 bool TwitchChannel::isMod() const
@@ -1224,6 +1356,7 @@ void TwitchChannel::setRoomId(const QString &id)
         }
         this->disconnected_ = false;
         this->lastConnectedAt_ = std::chrono::system_clock::now();
+        this->refreshBannedSelfBadges();
     }
 }
 
@@ -2782,10 +2915,15 @@ void TwitchChannel::setRestriction(ChannelRestriction restriction)
 
     this->restriction_ = restriction;
     this->restrictionChanged.invoke();
+    if (restriction != ChannelRestriction::Banned)
+    {
+        this->selfSubscriptionBadge_.reset();
+    }
     if (auto *twitch = getApp()->getTwitch())
     {
         twitch->updateGhostWatch(this);
     }
+    this->refreshBannedSelfBadges();
 }
 
 void TwitchChannel::setTimedOut(int seconds)

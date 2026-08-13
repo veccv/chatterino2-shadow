@@ -21,6 +21,7 @@
 #include "providers/twitch/TwitchAccountManager.hpp"
 #include "providers/twitch/TwitchChannel.hpp"
 #include "providers/twitch/TwitchHelpers.hpp"
+#include "providers/twitch/TwitchIrc.hpp"
 #include "providers/twitch/TwitchIrcServer.hpp"
 #include "providers/twitch/UserColor.hpp"
 #include "singletons/Settings.hpp"
@@ -55,6 +56,18 @@ const QSet<QString> SPECIAL_MESSAGE_TYPES{
     "modiversary",      // Mod anniversary.
     "socialsharingbadge",  // social media badge from sharing clips
 };
+
+void cacheGlobalSelfBadges(Communi::TagsRef tags)
+{
+    auto current = getApp()->getAccounts()->twitch.getCurrent();
+    if (current->isAnon())
+    {
+        return;
+    }
+
+    current->setGlobalTwitchBadges(parseBadgeTag(tags),
+                                   parseBadgeInfoTag(tags));
+}
 
 /// MessageFlag::Subscription message types
 /// This is duplicated with SUB_MESSAGE_TYPES in MessageBuilder.cpp until the `isSubscriptionMessage` parameter
@@ -650,6 +663,9 @@ void IrcMessageHandler::handleUserStateMessage(Communi::IrcMessage *message)
                           parsedBadges.contains("lead_moderator");
         }
 
+        auto tags = message->tags();
+        tc->setSelfTwitchBadges(parseBadgeTag(tags), parseBadgeInfoTag(tags));
+
         if (hasModBadge)
         {
             tc->setMod(true);
@@ -678,6 +694,12 @@ void IrcMessageHandler::handleUserStateMessage(Communi::IrcMessage *message)
                 QColor(colorTag));
         }
     }
+}
+
+void IrcMessageHandler::handleGlobalUserStateMessage(
+    Communi::IrcMessage *message)
+{
+    cacheGlobalSelfBadges(message->tags());
 }
 
 void IrcMessageHandler::handleWhisperMessage(Communi::IrcMessage *ircMessage)

@@ -212,6 +212,9 @@ const std::vector<QStringView> AUTH_SCOPES{
     // https://dev.twitch.tv/docs/api/reference/#get-followed-channels
     u"user:read:follows",  // for determining if the current user follows a streamer
 
+    // https://dev.twitch.tv/docs/api/reference/#check-user-subscription
+    u"user:read:subscriptions",  // for reading the current user's subscription in a channel
+
     u"moderator:manage:blocked_terms",  // for channel.moderate eventsub topic
 
     u"moderator:manage:unban_requests",  // for channel.moderate eventsub topic

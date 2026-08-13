@@ -3335,6 +3335,55 @@ void Helix::getFollowedChannel(
         .execute();
 }
 
+void Helix::checkUserSubscription(
+    QString userID, QString broadcasterID, const QObject *caller,
+    ResultCallback<std::optional<HelixUserSubscription>> successCallback,
+    FailureCallback<QString> failureCallback)
+{
+    this->makeGet("subscriptions/user",
+                  {
+                      {u"user_id"_s, userID},
+                      {u"broadcaster_id"_s, broadcasterID},
+                  })
+        .caller(caller)
+        .onSuccess([successCallback](auto result) {
+            const auto response = result.parseJson();
+            const auto subscription = response["data"_L1].toArray().at(0);
+            if (subscription.isObject())
+            {
+                successCallback(HelixUserSubscription(subscription.toObject()));
+            }
+            else
+            {
+                successCallback(std::nullopt);
+            }
+        })
+        .onError([successCallback, failureCallback](const auto &result) {
+            if (result.status() == 404)
+            {
+                successCallback(std::nullopt);
+                return;
+            }
+            if (!result.status())
+            {
+                failureCallback(result.formatError());
+                return;
+            }
+
+            auto obj = result.parseJson();
+            auto message = obj.value("message").toString();
+            if (!message.isEmpty())
+            {
+                failureCallback(message);
+            }
+            else
+            {
+                failureCallback(result.formatError());
+            }
+        })
+        .execute();
+}
+
 void Helix::createPoll(QString broadcasterID, QString title,
                        QStringList choices, const std::chrono::seconds duration,
                        const int pointsPerVote,

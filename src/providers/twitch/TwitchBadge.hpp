@@ -16,6 +16,7 @@ public:
     TwitchBadge(QString key, QString value);
 
     bool operator==(const TwitchBadge &other) const;
+    bool isGlobalTwitchBadge() const;
 
     // Class members are fetched from both "badges" and "badge-info" tags
     // E.g.: "badges": "subscriber/18", "badge-info": "subscriber/22"

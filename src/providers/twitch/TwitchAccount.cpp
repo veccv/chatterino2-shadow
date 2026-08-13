@@ -15,6 +15,7 @@
 #include "messages/MessageBuilder.hpp"
 #include "providers/seventv/SeventvAPI.hpp"
 #include "providers/twitch/api/Helix.hpp"
+#include "providers/twitch/TwitchBadge.hpp"
 #include "providers/twitch/TwitchCommon.hpp"
 #include "providers/twitch/TwitchUsers.hpp"
 #include "util/CancellationToken.hpp"
@@ -106,6 +107,34 @@ bool TwitchAccount::setOAuthToken(const QString &newOAuthToken)
 bool TwitchAccount::isAnon() const
 {
     return this->isAnon_;
+}
+
+void TwitchAccount::setGlobalTwitchBadges(
+    const std::vector<TwitchBadge> &badges,
+    const std::unordered_map<QString, QString> &badgeInfos)
+{
+    auto cache = this->cachedTwitchBadges_.access();
+    cache->badges.clear();
+    cache->badgeInfos.clear();
+    for (const auto &badge : badges)
+    {
+        if (!badge.isGlobalTwitchBadge())
+        {
+            continue;
+        }
+
+        cache->badges.push_back(badge);
+        auto infoIt = badgeInfos.find(badge.key_);
+        if (infoIt != badgeInfos.end())
+        {
+            cache->badgeInfos[badge.key_] = infoIt->second;
+        }
+    }
+}
+
+TwitchAccount::CachedTwitchBadges TwitchAccount::globalTwitchBadges() const
+{
+    return *this->cachedTwitchBadges_.accessConst();
 }
 
 void TwitchAccount::loadBlocks()

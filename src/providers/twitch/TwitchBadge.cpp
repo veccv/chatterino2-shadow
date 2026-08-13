@@ -43,4 +43,15 @@ bool TwitchBadge::operator==(const TwitchBadge &other) const
     return this->key_ == other.key_ && this->value_ == other.value_;
 }
 
+bool TwitchBadge::isGlobalTwitchBadge() const
+{
+    if (this->key_ == QStringLiteral("bits"))
+    {
+        return false;
+    }
+
+    return this->flag_ == MessageElementFlag::BadgeGlobalAuthority ||
+           this->flag_ == MessageElementFlag::BadgeVanity;
+}
+
 }  // namespace chatterino
