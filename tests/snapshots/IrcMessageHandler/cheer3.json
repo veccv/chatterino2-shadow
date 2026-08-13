@@ -61,6 +61,23 @@
                 },
                 {
                     "emote": {
+                        "images": {
+                            "1x": ""
+                        },
+                        "name": "",
+                        "tooltip": "normal chat user"
+                    },
+                    "flags": "AlwaysShow",
+                    "link": {
+                        "type": "None",
+                        "value": ""
+                    },
+                    "tooltip": "normal chat user",
+                    "trailingSpace": true,
+                    "type": "BadgeElement"
+                },
+                {
+                    "emote": {
                         "homePage": "https://bits.twitch.tv",
                         "images": {
                             "1x": "https://static-cdn.jtvnw.net/badges/v1/f1d2aab6-b647-47af-965b-84909cf303aa/1",

@@ -37,13 +37,17 @@
 #include "widgets/TooltipWidget.hpp"
 
 #include <QDrag>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMenu>
 #include <QMimeData>
 #include <QPainter>
+#include <QWidget>
 
+#include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 using namespace Qt::StringLiterals;
 
@@ -61,6 +65,50 @@ constexpr const int ADD_SPLIT_BUTTON_WIDTH = 16;
 
 // 5 minutes
 constexpr const qint64 THUMBNAIL_MAX_AGE_MS = 5LL * 60 * 1000;
+
+constexpr const char *ICON_HAHAA = "qrc:/twitch/haHAA.png";
+constexpr const char *ICON_BASEDGOD = "qrc:/twitch/BasedGod.png";
+
+QString switcherIconTag(const QString &path, int size)
+{
+    return QStringLiteral(
+               "<img src=\"%1\" width=\"%2\" height=\"%2\" "
+               "style=\"vertical-align:middle;\">")
+        .arg(path)
+        .arg(size)
+        .arg(size);
+}
+
+QString switcherLabelHtml(std::initializer_list<const char *> icons,
+                          const QString &text, int iconSize,
+                          const QColor &textColor)
+{
+    QString html =
+        QStringLiteral(
+            "<span style=\"white-space:nowrap;color:%1;line-height:%2px;\">")
+            .arg(textColor.name())
+            .arg(iconSize);
+    for (const char *icon : icons)
+    {
+        html += switcherIconTag(QString::fromUtf8(icon), iconSize);
+        html += QStringLiteral("&nbsp;");
+    }
+    html += text;
+    html += QStringLiteral("</span>");
+    return html;
+}
+
+int switcherIconSize(float scale)
+{
+    return std::clamp(static_cast<int>(std::lround(13.F * scale)), 10, 16);
+}
+
+void prepareSwitcherButton(LabelButton *button)
+{
+    button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
+    button->setPadding({6, 0});
+    button->enableRichText();
+}
 
 auto formatRoomModeUnclean(
     const SharedAccessGuard<const TwitchChannel::RoomModes> &modes) -> QString
@@ -378,9 +426,40 @@ void SplitHeader::initializeLayout()
             w->hide();
             w->setMenu(this->createChatModeMenu());
         }),
-        this->shadowViewButton_ = makeWidget<LabelButton>([&](auto w) {
-            w->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
-            w->setPadding({4, 0});
+        makeWidget<BaseWidget>([](auto w) {
+            w->setScaleIndependentSize(12, 4);
+        }),
+        this->shadowSwitcherHost_ = makeWidget<QWidget>([this](auto w) {
+            w->setObjectName(QStringLiteral("shadowSwitcherHost"));
+            w->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
+            w->setAttribute(Qt::WA_StyledBackground, true);
+
+            this->shadowViewButton_ = makeWidget<LabelButton>([](auto button) {
+                prepareSwitcherButton(button);
+            });
+            this->shadowSendButton_ = makeWidget<LabelButton>([](auto button) {
+                prepareSwitcherButton(button);
+            });
+
+            auto *divider = makeWidget<QFrame>([](auto frame) {
+                frame->setObjectName(QStringLiteral("shadowSwitcherDivider"));
+                frame->setFrameShape(QFrame::VLine);
+                frame->setFrameShadow(QFrame::Plain);
+                frame->setFixedWidth(1);
+                frame->setSizePolicy(QSizePolicy::Fixed,
+                                     QSizePolicy::MinimumExpanding);
+            });
+
+            auto *bar = new QHBoxLayout(w);
+            bar->setContentsMargins(4, 0, 4, 0);
+            bar->setSpacing(2);
+            bar->setAlignment(Qt::AlignVCenter);
+            bar->addWidget(this->shadowViewButton_, 0, Qt::AlignVCenter);
+            bar->addWidget(divider, 0, Qt::AlignVCenter);
+            bar->addWidget(this->shadowSendButton_, 0, Qt::AlignVCenter);
+        }),
+        makeWidget<BaseWidget>([](auto w) {
+            w->setScaleIndependentSize(12, 4);
         }),
         // pin indicator
         this->pinButton_,
@@ -452,7 +531,24 @@ void SplitHeader::initializeLayout()
                          }
                      });
 
+    QObject::connect(this->shadowSendButton_, &Button::leftClicked, this,
+                     [this]() {
+                         switch (this->split_->getShadowSendTarget())
+                         {
+                             case ShadowSendTarget::Normal:
+                                 this->split_->setShadowSendTarget(
+                                     ShadowSendTarget::Shadow);
+                                 break;
+                             case ShadowSendTarget::Shadow:
+                                 this->split_->setShadowSendTarget(
+                                     ShadowSendTarget::Normal);
+                                 break;
+                         }
+                     });
+
     this->updateShadowViewButton();
+    this->updateShadowSendButton();
+    this->updateShadowSwitcherChrome();
 
     QObject::connect(this->pinButton_, &Button::leftClicked, this, [this]() {
         this->split_->togglePinnedBanner();
@@ -887,24 +983,115 @@ void SplitHeader::updateShadowViewButton()
         return;
     }
 
+    const int iconSize = switcherIconSize(this->scale());
+    const QColor textColor = this->split_->hasFocus()
+                                 ? this->theme->splits.header.focusedText
+                                 : this->theme->splits.header.text;
+
     switch (this->split_->getShadowViewMode())
     {
         case ShadowViewMode::Both:
-            this->shadowViewButton_->setText(QStringLiteral("Both"));
+            this->shadowViewButton_->setText(switcherLabelHtml(
+                {ICON_BASEDGOD}, QStringLiteral("Both"), iconSize, textColor));
             this->shadowViewButton_->setToolTip(
                 QStringLiteral("View: Twitch and shadow chat"));
             break;
         case ShadowViewMode::Normal:
-            this->shadowViewButton_->setText(QStringLiteral("Chat"));
+            this->shadowViewButton_->setText(switcherLabelHtml(
+                {ICON_HAHAA}, QStringLiteral("Chat"), iconSize, textColor));
             this->shadowViewButton_->setToolTip(
                 QStringLiteral("View: Twitch chat only"));
             break;
         case ShadowViewMode::Shadow:
-            this->shadowViewButton_->setText(QStringLiteral("Shadow"));
+            this->shadowViewButton_->setText(switcherLabelHtml(
+                {ICON_BASEDGOD}, QStringLiteral("Shadow"), iconSize,
+                textColor));
             this->shadowViewButton_->setToolTip(
                 QStringLiteral("View: shadow chat only"));
             break;
     }
+}
+
+void SplitHeader::updateShadowSendButton()
+{
+    if (this->shadowSendButton_ == nullptr)
+    {
+        return;
+    }
+
+    const int iconSize = switcherIconSize(this->scale());
+    const QColor textColor = this->split_->hasFocus()
+                                 ? this->theme->splits.header.focusedText
+                                 : this->theme->splits.header.text;
+
+    switch (this->split_->getShadowSendTarget())
+    {
+        case ShadowSendTarget::Normal:
+            this->shadowSendButton_->setText(switcherLabelHtml(
+                {ICON_HAHAA}, QStringLiteral("To Chat"), iconSize, textColor));
+            this->shadowSendButton_->setToolTip(
+                QStringLiteral("Send messages to Twitch chat only"));
+            break;
+        case ShadowSendTarget::Shadow:
+            this->shadowSendButton_->setText(switcherLabelHtml(
+                {ICON_BASEDGOD}, QStringLiteral("To Shadow"), iconSize,
+                textColor));
+            this->shadowSendButton_->setToolTip(
+                QStringLiteral("Send messages to shadow chat only"));
+            break;
+    }
+}
+
+void SplitHeader::updateShadowSwitcherChrome()
+{
+    if (this->shadowSwitcherHost_ == nullptr ||
+        this->shadowViewButton_ == nullptr ||
+        this->shadowSendButton_ == nullptr)
+    {
+        return;
+    }
+
+    const float scale = this->scale();
+    const int padX = std::max(3, static_cast<int>(std::lround(4.F * scale)));
+    const int gap = std::max(1, static_cast<int>(std::lround(2.F * scale)));
+    const int radius = std::max(3, static_cast<int>(std::lround(5.F * scale)));
+    const int btnPadX = std::max(4, static_cast<int>(std::lround(6.F * scale)));
+
+    if (auto *bar =
+            qobject_cast<QHBoxLayout *>(this->shadowSwitcherHost_->layout()))
+    {
+        bar->setContentsMargins(padX, 0, padX, 0);
+        bar->setSpacing(gap);
+    }
+
+    this->shadowViewButton_->setPadding({btnPadX, 0});
+    this->shadowSendButton_->setPadding({btnPadX, 0});
+
+    const bool light = this->theme->isLightTheme();
+    const QColor fill =
+        light ? QColor(0, 0, 0, 22) : QColor(255, 255, 255, 28);
+    const QColor stroke =
+        light ? QColor(0, 0, 0, 55) : QColor(255, 255, 255, 60);
+    const QColor divider =
+        light ? QColor(0, 0, 0, 40) : QColor(255, 255, 255, 45);
+    const QColor hover = light ? QColor(0, 0, 0) : QColor(255, 255, 255);
+
+    this->shadowSwitcherHost_->setStyleSheet(QStringLiteral(
+        "#shadowSwitcherHost {"
+        "  background-color: %1;"
+        "  border: 1px solid %2;"
+        "  border-radius: %3px;"
+        "}"
+        "#shadowSwitcherDivider {"
+        "  color: %4;"
+        "}")
+                                                 .arg(fill.name(QColor::HexArgb),
+                                                      stroke.name(QColor::HexArgb),
+                                                      QString::number(radius),
+                                                      divider.name(QColor::HexArgb)));
+
+    this->shadowViewButton_->setMouseEffectColor(hover);
+    this->shadowSendButton_->setMouseEffectColor(hover);
 }
 
 void SplitHeader::resetThumbnail()
@@ -959,6 +1146,19 @@ void SplitHeader::scaleChangedEvent(float scale)
     this->pinButton_->setFixedWidth(w);
 
     this->addButton_->setFixedWidth(addSplitWidth);
+    if (this->shadowSwitcherHost_ != nullptr)
+    {
+        this->shadowSwitcherHost_->setMaximumHeight(std::max(0, w - 10));
+        if (auto *headerLayout = this->layout())
+        {
+            headerLayout->setAlignment(this->shadowSwitcherHost_,
+                                       Qt::AlignVCenter);
+        }
+    }
+
+    this->updateShadowSwitcherChrome();
+    this->updateShadowViewButton();
+    this->updateShadowSendButton();
 }
 
 void SplitHeader::setAddButtonVisible(bool value)
@@ -1254,6 +1454,9 @@ void SplitHeader::themeChangedEvent()
 
     // Re-apply pin button color to respect updated theme
     this->updatePinButton();
+    this->updateShadowSwitcherChrome();
+    this->updateShadowViewButton();
+    this->updateShadowSendButton();
 
     auto bg = this->theme->splits.header.background;
     this->addButton_->setOptions({

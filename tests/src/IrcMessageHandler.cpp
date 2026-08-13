@@ -12,6 +12,7 @@
 #include "lib/Snapshot.hpp"
 #include "messages/Emote.hpp"
 #include "messages/Message.hpp"
+#include "messages/MessageElement.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/ChatterinoBadges.hpp"
 #include "mocks/DisabledStreamerMode.hpp"
@@ -666,6 +667,37 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestIrcMessageHandlerP, Integrity)
 {
     ASSERT_FALSE(UPDATE_SNAPSHOTS);  // make sure fixtures are actually tested
+}
+
+TEST(IrcMessageHandler, NormalUserBadgeIsFirst)
+{
+    MockApplication app(u"{}"_s);
+    auto channel = std::make_shared<TwitchChannel>(u"pajlada"_s);
+    app.twitch.mockChannels.emplace(u"pajlada"_s, channel);
+
+    VectorMessageSink sink;
+    auto *ircMessage = Communi::IrcMessage::fromData(
+        "@badge-info=;badges=moderator/1;color=#FF0000;display-name=pajlada;"
+        "emotes=;id=abc;mod=1;room-id=11148817;subscriber=0;tmi-sent-ts="
+        "1662201093248;turbo=0;user-id=11148817;user-type=mod "
+        ":pajlada!pajlada@pajlada.tmi.twitch.tv PRIVMSG #pajlada :hello",
+        nullptr);
+    ASSERT_NE(ircMessage, nullptr);
+    IrcMessageHandler::parseMessageInto(ircMessage, sink, channel.get());
+    delete ircMessage;
+
+    ASSERT_EQ(sink.messages().size(), 1);
+    const BadgeElement *firstBadge = nullptr;
+    for (const auto &element : sink.messages()[0]->elements)
+    {
+        if (auto *badge = dynamic_cast<const BadgeElement *>(element.get()))
+        {
+            firstBadge = badge;
+            break;
+        }
+    }
+    ASSERT_NE(firstBadge, nullptr);
+    EXPECT_EQ(firstBadge->getTooltip(), QStringLiteral("normal chat user"));
 }
 
 TEST_P(TestIrcMessageHandlerP, CloneElements)

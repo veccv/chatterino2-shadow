@@ -56,7 +56,8 @@ constexpr int JOIN_RATELIMIT_COOLDOWN = 12500;
 using namespace chatterino;
 
 void sendHelixMessage(const std::shared_ptr<TwitchChannel> &channel,
-                      const QString &message, const QString &replyParentId = {})
+                      const QString &message, const QString &replyParentId = {},
+                      bool allowShadowFallback = true)
 {
     auto broadcasterID = channel->roomId();
     if (broadcasterID.isEmpty())
@@ -95,8 +96,8 @@ void sendHelixMessage(const std::shared_ptr<TwitchChannel> &channel,
                 chan->addSystemMessage("Your message was not sent.");
             }
         },
-        [weak = std::weak_ptr(channel), chatText = message](
-            auto error, auto helixMessage) {
+        [weak = std::weak_ptr(channel), chatText = message,
+         allowShadowFallback, replyParentId](auto error, auto helixMessage) {
             auto chan = weak.lock();
             if (!chan)
             {
@@ -119,11 +120,16 @@ void sendHelixMessage(const std::shared_ptr<TwitchChannel> &channel,
                         return "Failed to send message: " + helixMessage;
                     case Error::Forbidden: {
                         chan->setRestriction(ChannelRestriction::Banned);
-                        bool sent = false;
-                        if (chan->tryInterceptShadowSend(chatText, sent) &&
-                            sent)
+                        if (allowShadowFallback)
                         {
-                            return {};
+                            bool sent = false;
+                            if (chan->tryInterceptShadowSend(
+                                    chatText, sent, std::nullopt,
+                                    replyParentId) &&
+                                sent)
+                            {
+                                return {};
+                            }
                         }
                         return "You are not allowed to send messages in this "
                                "channel.";
@@ -407,23 +413,26 @@ std::shared_ptr<Channel> TwitchIrcServer::createChannel(
     // no Channel's should live
     // NOTE: CHANNEL_LIFETIME
     std::ignore = channel->sendMessageSignal.connect(
-        [this, channel = std::weak_ptr(channel)](auto &msg, bool &sent) {
+        [this, channel = std::weak_ptr(channel)](auto &msg, bool &sent,
+                                                 bool allowShadowFallback) {
             auto c = channel.lock();
             if (!c)
             {
                 return;
             }
-            this->onMessageSendRequested(c, msg, sent);
+            this->onMessageSendRequested(c, msg, sent, allowShadowFallback);
         });
     std::ignore = channel->sendReplySignal.connect(
         [this, channel = std::weak_ptr(channel)](auto &msg, auto &replyId,
-                                                 bool &sent) {
+                                                 bool &sent,
+                                                 bool allowShadowFallback) {
             auto c = channel.lock();
             if (!c)
             {
                 return;
             }
-            this->onReplySendRequested(c, msg, replyId, sent);
+            this->onReplySendRequested(c, msg, replyId, sent,
+                                       allowShadowFallback);
         });
 
     return channel;
@@ -829,7 +838,7 @@ bool TwitchIrcServer::prepareToSend(
 
 void TwitchIrcServer::onMessageSendRequested(
     const std::shared_ptr<TwitchChannel> &channel, const QString &message,
-    bool &sent)
+    bool &sent, bool allowShadowFallback)
 {
     sent = false;
 
@@ -841,7 +850,7 @@ void TwitchIrcServer::onMessageSendRequested(
 
     if (getSettings()->shouldSendHelixChat())
     {
-        sendHelixMessage(channel, message);
+        sendHelixMessage(channel, message, {}, allowShadowFallback);
     }
     else
     {
@@ -853,7 +862,7 @@ void TwitchIrcServer::onMessageSendRequested(
 
 void TwitchIrcServer::onReplySendRequested(
     const std::shared_ptr<TwitchChannel> &channel, const QString &message,
-    const QString &replyId, bool &sent)
+    const QString &replyId, bool &sent, bool allowShadowFallback)
 {
     sent = false;
 
@@ -865,7 +874,7 @@ void TwitchIrcServer::onReplySendRequested(
 
     if (getSettings()->shouldSendHelixChat())
     {
-        sendHelixMessage(channel, message, replyId);
+        sendHelixMessage(channel, message, replyId, allowShadowFallback);
     }
     else
     {

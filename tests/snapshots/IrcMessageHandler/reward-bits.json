@@ -192,6 +192,23 @@
                     "type": "TwitchModerationElement"
                 },
                 {
+                    "emote": {
+                        "images": {
+                            "1x": ""
+                        },
+                        "name": "",
+                        "tooltip": "normal chat user"
+                    },
+                    "flags": "AlwaysShow",
+                    "link": {
+                        "type": "None",
+                        "value": ""
+                    },
+                    "tooltip": "normal chat user",
+                    "trailingSpace": true,
+                    "type": "BadgeElement"
+                },
+                {
                     "color": "#ffff0000",
                     "flags": "Username",
                     "link": {
