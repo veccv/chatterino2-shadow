@@ -31,7 +31,7 @@ TEST(ShadowProtocol, EncodeJoinLeavePublishHaveNoToken)
 
 TEST(ShadowProtocol, CompileTimeUrlHasNoQuery)
 {
-    QUrl url(u"ws://127.0.0.1:8787"_s);
+    QUrl url(u"ws://92.5.14.8:8787"_s);
     EXPECT_TRUE(url.query().isEmpty());
     EXPECT_FALSE(url.toString().contains(u"oauth"_s, Qt::CaseInsensitive));
 }

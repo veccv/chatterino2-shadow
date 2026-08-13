@@ -90,7 +90,8 @@ Env::Env()
     , twitchServerSecure(
           env::readBool("CHATTERINO2_TWITCH_SERVER_SECURE", true))
     , proxyUrl(readOptionalStringEnv("CHATTERINO2_PROXY_URL"))
-    , shadowRelayUrl(QStringLiteral("ws://127.0.0.1:8787"))
+    , shadowRelayUrl(qEnvironmentVariable("CHATTERINO2_SHADOW_RELAY_URL",
+                                          "ws://92.5.14.8:8787"))
     , logToFile(qEnvironmentVariable(env::LOG_TO_FILE, ""))
 {
 }
