@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - master
-      - "bugfix-release/*"
-      - "release/*"
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
     inputs:
@@ -19,67 +19,33 @@ on:
           - auto
           - nightly
           - stable
-  merge_group:
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
-  C2_ENABLE_LTO: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/bugfix-release/') || startsWith(github.ref, 'refs/heads/release/') }}
   CHATTERINO_REQUIRE_CLEAN_GIT: On
-  CHATTERINO_BUILD_TYPE: ${{ case(inputs.buildType != '', inputs.buildType, 'auto') }}
+  CHATTERINO_BUILD_TYPE: ${{ inputs.buildType || 'auto' }}
   CONAN_VERSION: 2.28.1
 
 jobs:
-  build-ubuntu-docker:
-    # Our Ubuntu builds are built using Docker images that have been pre-published.
-    # This speeds up builds for us since we do some pre-building of packages that takes a long time
-    # However, this means if you need to add a dependency to the build, you'll need to do that
-    # in the https://github.com/Chatterino/docker repository first.
-    name: "Build Ubuntu in Docker"
+  build-ubuntu:
+    name: "Build Ubuntu 24.04"
     runs-on: ubuntu-latest
-    container: ${{ matrix.container }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            container: ghcr.io/chatterino/chatterino2-build-ubuntu-22.04:latest
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-            build-deb: true
-            plugins: true
-          - os: ubuntu-24.04
-            container: ghcr.io/chatterino/chatterino2-build-ubuntu-24.04:latest
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-            build-deb: true
-            plugins: true
-          - os: ubuntu-24.04
-            container: ghcr.io/chatterino/chatterino2-build-ubuntu-24.04:latest
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-            build-deb: false
-            plugins: false
-          - os: ubuntu-26.04
-            container: ghcr.io/chatterino/chatterino2-build-ubuntu-26.04:latest
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-            build-deb: true
-            plugins: true
+    container: ghcr.io/chatterino/chatterino2-build-ubuntu-24.04:latest
     env:
-      C2_ENABLE_LTO: ${{ matrix.force-lto }}
-      C2_ENABLE_CRASHPAD: ${{ matrix.skip-crashpad == false }}
+      C2_ENABLE_LTO: false
+      C2_ENABLE_CRASHPAD: true
 
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
-          fetch-depth: 0 # allows for tags access
+          fetch-depth: 0
 
       - name: Fix git permission error
         run: |
@@ -123,52 +89,42 @@ jobs:
             -DCHATTERINO_STATIC_QT_BUILD=On \
             -DCHATTERINO_NIGHTLY_BUILD=${{ steps.build-type.outputs.NIGHTLY_BUILD }} \
             -DFORCE_JSON_GENERATION=Off \
-            -DCHATTERINO_PLUGINS=${{ case(matrix.plugins, 'On', 'Off') }} \
+            -DCHATTERINO_PLUGINS=On \
             ..
           make -j"$(nproc)"
 
       - name: Package - .deb (Ubuntu)
-        if: matrix.build-deb
         run: |
           cd build
           sh ./../.CI/CreateUbuntuDeb.sh
 
       - name: Upload artifact - .deb (Ubuntu)
-        if: matrix.build-deb
         uses: actions/upload-artifact@v7
         with:
-          name: Chatterino-${{ matrix.os }}.deb
-          path: build/Chatterino-${{ matrix.os }}-x86_64.deb
+          name: Chatterino-ubuntu-24.04.deb
+          path: build/Chatterino-ubuntu-24.04-x86_64.deb
+          if-no-files-found: error
 
   build:
-    name: "Build ${{ matrix.os }}, Qt ${{ matrix.qt-version }} (LTO:${{ matrix.force-lto }}, crashpad:${{ case(matrix.skip-crashpad, 'off', 'on') }})"
+    name: "Build ${{ matrix.os }}"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          # macOS
           - os: macos-26
             qt-version: 6.11.1
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-          # Windows
           - os: windows-latest
             qt-version: 6.8.3
-            force-lto: false
-            skip-artifact: false
-            skip-crashpad: false
-
       fail-fast: false
     env:
-      C2_ENABLE_LTO: ${{ matrix.force-lto }}
-      C2_ENABLE_CRASHPAD: ${{ matrix.skip-crashpad == false }}
+      C2_ENABLE_LTO: false
+      C2_ENABLE_CRASHPAD: true
 
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
-          fetch-depth: 0 # allows for tags access
+          fetch-depth: 0
 
       - name: Determine build type
         id: build-type
@@ -194,7 +150,6 @@ jobs:
           fi
 
       - name: Install Qt6
-        if: startsWith(matrix.qt-version, '6.')
         uses: jurplel/install-qt-action@v4.3.1
         with:
           cache: true
@@ -202,20 +157,17 @@ jobs:
           modules: qtimageformats
           version: ${{ matrix.qt-version }}
 
-      # WINDOWS
       - name: Enable Developer Command Prompt (Windows)
         if: startsWith(matrix.os, 'windows')
         uses: Chatterino/msvc-dev-cmd@v2.0.7
 
       - name: Setup sccache (Windows)
-        # sccache v0.7.4
         uses: hendrikmuhs/ccache-action@v1.2.23
         if: startsWith(matrix.os, 'windows')
         with:
           variant: sccache
-          # only save on on the default (master) branch
           save: ${{ github.event_name == 'push' }}
-          key: sccache-build-${{ matrix.os }}-${{ matrix.qt-version }}-${{ matrix.skip-crashpad }}
+          key: sccache-build-${{ matrix.os }}-${{ matrix.qt-version }}
           restore-keys: |
             sccache-build-${{ matrix.os }}-${{ matrix.qt-version }}
 
@@ -273,7 +225,7 @@ jobs:
           nmake /S /NOLOGO
 
       - name: Build crashpad (Windows)
-        if: startsWith(matrix.os, 'windows') && !matrix.skip-crashpad
+        if: startsWith(matrix.os, 'windows')
         shell: pwsh
         run: |
           cd build
@@ -281,9 +233,8 @@ jobs:
           nmake /S /NOLOGO chatterino-crash-handler
           mkdir Chatterino2/crashpad
           cp bin/crashpad/crashpad-handler.exe Chatterino2/crashpad/crashpad-handler.exe
-          7z a bin/chatterino-Qt-${{ matrix.qt-version }}.pdb.7z bin/chatterino.pdb
 
-      - name: Prepare build dir (windows)
+      - name: Prepare build dir (Windows)
         if: startsWith(matrix.os, 'windows')
         run: |
           cd build
@@ -291,40 +242,55 @@ jobs:
           cp bin/chatterino.exe Chatterino2/
           ..\.CI\deploy-crt.ps1 Chatterino2
 
-      - name: Package (windows)
+      - name: Package (Windows)
         if: startsWith(matrix.os, 'windows')
         working-directory: build
         run: |
           7z a chatterino-windows-x86-64-Qt-${{ matrix.qt-version }}.zip Chatterino2/
 
       - name: Upload artifact (Windows - binary)
-        if: startsWith(matrix.os, 'windows') && !matrix.skip-artifact
+        if: startsWith(matrix.os, 'windows')
         uses: actions/upload-artifact@v7
         with:
           name: chatterino-windows-x86-64-Qt-${{ matrix.qt-version }}.zip
           path: build/chatterino-windows-x86-64-Qt-${{ matrix.qt-version }}.zip
+          if-no-files-found: error
 
-      - name: Upload artifact (Windows - symbols)
-        if: startsWith(matrix.os, 'windows') && !matrix.skip-artifact
+      - name: Install InnoSetup (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: choco install innosetup -y
+
+      - name: Add InnoSetup to path (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: echo "C:\Program Files (x86)\Inno Setup 6\" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build installer (Windows)
+        if: startsWith(matrix.os, 'windows')
+        id: build-installer
+        working-directory: build
+        run: ..\.CI\build-installer.ps1
+        shell: powershell
+
+      - name: Upload artifact (Windows - installer)
+        if: startsWith(matrix.os, 'windows')
         uses: actions/upload-artifact@v7
         with:
-          name: chatterino-windows-x86-64-Qt-${{ matrix.qt-version }}-symbols.pdb.7z
-          path: build/bin/chatterino-Qt-${{ matrix.qt-version }}.pdb.7z
+          name: ${{ steps.build-installer.outputs.C2_INSTALLER_BASE_NAME }}.exe
+          path: build/${{ steps.build-installer.outputs.C2_INSTALLER_BASE_NAME }}.exe
+          if-no-files-found: error
 
       - name: Clean Conan cache
         if: startsWith(matrix.os, 'windows')
         run: conan cache clean --source --build --download "*"
         shell: bash
 
-      # MACOS
-      - name: Install dependencies (MacOS)
+      - name: Install dependencies (macOS)
         if: startsWith(matrix.os, 'macos')
         run: |
-          # brew install openssl rapidjson p7zip create-dmg cmake tree boost hunspell
           brew install openssl rapidjson p7zip create-dmg tree boost hunspell
         shell: bash
 
-      - name: Build (MacOS)
+      - name: Build (macOS)
         if: startsWith(matrix.os, 'macos')
         run: |
           mkdir build
@@ -342,35 +308,35 @@ jobs:
           make -j"$(sysctl -n hw.logicalcpu)"
         shell: bash
 
-      - name: Package (MacOS)
+      - name: Package (macOS)
         if: startsWith(matrix.os, 'macos')
         env:
-          OUTPUT_DMG_PATH: chatterino-macos-Qt-${{ matrix.qt-version}}.dmg
+          OUTPUT_DMG_PATH: chatterino-macos-Qt-${{ matrix.qt-version }}.dmg
         run: |
-          ls -la
-          pwd
-          ls -la build || true
           cd build
           ./../.CI/MacDeploy.sh
           ./../.CI/CreateDMG.sh
         shell: bash
 
-      - name: Upload artifact (MacOS)
+      - name: Upload artifact (macOS)
         if: startsWith(matrix.os, 'macos')
         uses: actions/upload-artifact@v7
         with:
           name: chatterino-macos-Qt-${{ matrix.qt-version }}.dmg
           path: build/chatterino-macos-Qt-${{ matrix.qt-version }}.dmg
+          if-no-files-found: error
 
-  create-release:
-    needs: [build-ubuntu-docker, build]
+  publish-release:
+    needs: [build-ubuntu, build]
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # allows for tags access
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8
         name: Download artifacts
@@ -378,22 +344,27 @@ jobs:
           path: release-artifacts/
           merge-multiple: true
 
-      - name: Copy flatpakref
+      - name: Select installer assets
         run: |
-          cp .CI/chatterino-nightly.flatpakref release-artifacts/
-        shell: bash
-
-      - name: Remove macOS artifacts
-        run: |
-          rm -f release-artifacts/*macos*.dmg
-        shell: bash
+          mkdir -p release-assets
+          find release-artifacts -type f \( \
+            -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.deb' \
+          \) -exec cp {} release-assets/ \;
+          ls -la release-assets
+          count="$(find release-assets -type f | wc -l | tr -d ' ')"
+          if [ "$count" -lt 4 ]; then
+            echo "Expected at least 4 installer assets (exe, zip, dmg, deb), found $count"
+            exit 1
+          fi
 
       - name: Setup Python
+        if: github.ref == 'refs/heads/master'
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Format changes
+        if: github.ref == 'refs/heads/master'
         id: format-changes
         run: |
           delimiter=$(openssl rand -hex 32)
@@ -404,20 +375,35 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Create release
+      - name: Publish nightly release
+        if: github.ref == 'refs/heads/master'
         uses: ncipollo/release-action@v1.21.0
         with:
           replacesArtifacts: true
           allowUpdates: true
           artifactErrorsFailBuild: true
-          artifacts: "release-artifacts/*"
+          artifacts: "release-assets/*"
           body: ${{ steps.format-changes.outputs.changelog }}
           prerelease: true
           name: Nightly Release
           tag: nightly-build
 
       - name: Update nightly-build tag
+        if: github.ref == 'refs/heads/master'
         run: |
           git tag -f nightly-build
           git push -f origin nightly-build
         shell: bash
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          replacesArtifacts: true
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          artifacts: "release-assets/*"
+          generateReleaseNotes: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          name: ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
