@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <unordered_set>
 
 namespace chatterino {
 
@@ -77,6 +78,9 @@ public:
     virtual void initEventAPIs(BttvLiveUpdates *bttvLiveUpdates,
                                SeventvEventAPI *seventvEventAPI) = 0;
 
+    /// JOIN or PART the hidden anonymous read connection for banned channels.
+    virtual void updateGhostWatch(TwitchChannel *channel) = 0;
+
     // Update this interface with TwitchIrcServer methods as needed
 };
 
@@ -86,6 +90,7 @@ public:
     enum class ConnectionType {
         Read,
         Write,
+        Ghost,
     };
 
     TwitchIrcServer();
@@ -127,6 +132,8 @@ public:
                             const QString &emoteSetID) override;
 
     void addFakeMessage(const QString &data) override;
+
+    void updateGhostWatch(TwitchChannel *channel) override;
 
     void addGlobalSystemMessage(const QString &messageText) override;
 
@@ -192,11 +199,21 @@ private:
 
     bool prepareToSend(const std::shared_ptr<TwitchChannel> &channel);
 
+    void initializeGhostConnection();
+    void ensureGhostConnected();
+    void stopGhostConnection();
+    void onGhostConnected();
+    void ghostConnectionMessageReceived(Communi::IrcMessage *message);
+    void sendGhostJoin(const QString &channelName);
+    void sendGhostPart(const QString &channelName);
+
     QMap<QString, std::weak_ptr<Channel>> channels;
     std::mutex channelMutex;
 
     QObjectPtr<IrcConnection> writeConnection_ = nullptr;
     QObjectPtr<IrcConnection> readConnection_ = nullptr;
+    QObjectPtr<IrcConnection> ghostConnection_ = nullptr;
+    std::unordered_set<QString> ghostRooms_;
 
     // Our rate limiting bucket for the Twitch join rate limits
     // https://dev.twitch.tv/docs/irc/guide#rate-limits

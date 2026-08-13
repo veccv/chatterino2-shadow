@@ -90,6 +90,8 @@ public:
      * This method is used to update the text of the timeout and slow mode timer
      */
     void setSendWaitStatus(const QString &text) const;
+    void setRestrictionStatus(const QString &text) const;
+    QString restrictionStatus() const;
 
     void triggerSelfMessageReceived();
 
@@ -172,6 +174,7 @@ protected:
         QLabel *textEditLength;
         LabelButton *sendButton;
         QLabel *sendWaitStatus;
+        QLabel *restrictionStatus;
         SvgButton *emoteButton;
         QWidget *historySearchWrap;
         QLineEdit *historySearchInput;

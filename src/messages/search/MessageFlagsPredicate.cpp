@@ -70,6 +70,10 @@ MessageFlagsPredicate::MessageFlagsPredicate(const QString &flags, bool negate)
         {
             this->flags_.set(MessageFlag::Announcement);
         }
+        else if (flag == "shadow")
+        {
+            this->flags_.set(MessageFlag::ShadowMessage);
+        }
     }
 }
 

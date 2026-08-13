@@ -54,6 +54,7 @@ class BttvLiveUpdates;
 class FfzEmotes;
 class SeventvEmotes;
 class SeventvEventAPI;
+class ShadowRelay;
 class ILinkResolver;
 class IStreamerMode;
 class ITwitchUsers;
@@ -114,6 +115,7 @@ public:
     virtual FfzEmotes *getFfzEmotes() = 0;
     virtual SeventvEmotes *getSeventvEmotes() = 0;
     virtual SeventvEventAPI *getSeventvEventAPI() = 0;
+    virtual ShadowRelay *getShadowRelay() = 0;
     virtual ILinkResolver *getLinkResolver() = 0;
     virtual IStreamerMode *getStreamerMode() = 0;
     virtual ITwitchUsers *getTwitchUsers() = 0;
@@ -184,6 +186,7 @@ private:
     std::unique_ptr<FfzEmotes> ffzEmotes;
     std::unique_ptr<SeventvEmotes> seventvEmotes;
     std::unique_ptr<SeventvEventAPI> seventvEventAPI;
+    std::unique_ptr<ShadowRelay> shadowRelay;
     std::unique_ptr<ILinkResolver> linkResolver;
     std::unique_ptr<IStreamerMode> streamerMode;
     std::unique_ptr<ITwitchUsers> twitchUsers;
@@ -236,6 +239,7 @@ public:
     FfzEmotes *getFfzEmotes() override;
     SeventvEmotes *getSeventvEmotes() override;
     SeventvEventAPI *getSeventvEventAPI() override;
+    ShadowRelay *getShadowRelay() override;
     pronouns::Pronouns *getPronouns() override;
     eventsub::IController *getEventSub() override;
 

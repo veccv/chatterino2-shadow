@@ -12,6 +12,7 @@
 #include <QString>
 #include <QUuid>
 
+#include <cstdint>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -37,6 +38,12 @@ class IndirectChannel;
 // from widgets/Window.hpp
 enum class WindowType;
 
+enum class ShadowViewMode : std::uint8_t {
+    Both,
+    Normal,
+    Shadow,
+};
+
 struct SplitDescriptor {
     // Twitch or mentions or watching or live or automod or whispers or IRC
     QString type_;
@@ -53,6 +60,8 @@ struct SplitDescriptor {
     std::optional<bool> spellCheckOverride;
 
     QList<QUuid> filters_;
+
+    ShadowViewMode shadowViewMode_{ShadowViewMode::Both};
 
     static SplitDescriptor loadFromJSON(const QJsonObject &root);
 

@@ -301,6 +301,11 @@ void SplitInput::initLayout()
         this->ui_.sendWaitStatus->setHidden(true);
         hbox->addWidget(this->ui_.sendWaitStatus);
 
+        this->ui_.restrictionStatus = new QLabel();
+        this->ui_.restrictionStatus->setAlignment(Qt::AlignRight);
+        this->ui_.restrictionStatus->setHidden(true);
+        hbox->addWidget(this->ui_.restrictionStatus);
+
         this->ui_.emoteButton = new SvgButton(
             {
                 .dark = ":/buttons/emote.svg",
@@ -398,6 +403,7 @@ void SplitInput::themeChangedEvent()
         palette.setColor(QPalette::WindowText, this->theme->splits.input.text);
         this->ui_.textEditLength->setPalette(palette);
         this->ui_.sendWaitStatus->setPalette(palette);
+        this->ui_.restrictionStatus->setPalette(palette);
     }
 
     {
@@ -1606,6 +1612,7 @@ void SplitInput::updateFonts()
         app->getFonts()->getFont(FontStyle::TimestampMedium, this->scale());
     this->ui_.textEditLength->setFont(tsMedium);
     this->ui_.sendWaitStatus->setFont(tsMedium);
+    this->ui_.restrictionStatus->setFont(tsMedium);
     this->ui_.replyLabel->setFont(
         app->getFonts()->getFont(FontStyle::ChatMediumBold, this->scale()));
 
@@ -1803,6 +1810,17 @@ void SplitInput::setSendWaitStatus(const QString &text) const
     {
         this->ui_.sendWaitStatus->setHidden(!getSettings()->showSendWaitTimer);
     }
+}
+
+void SplitInput::setRestrictionStatus(const QString &text) const
+{
+    this->ui_.restrictionStatus->setText(text);
+    this->ui_.restrictionStatus->setHidden(text.isEmpty());
+}
+
+QString SplitInput::restrictionStatus() const
+{
+    return this->ui_.restrictionStatus->text();
 }
 
 }  // namespace chatterino

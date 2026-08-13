@@ -79,6 +79,11 @@ public:
         return nullptr;
     }
 
+    ShadowRelay *getShadowRelay() override
+    {
+        return nullptr;
+    }
+
     Settings settings;
     Updates updates;
     DisabledStreamerMode streamerMode;
