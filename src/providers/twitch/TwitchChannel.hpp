@@ -193,7 +193,8 @@ public:
     /// If Banned or TimedOut, publish to shadow and skip Twitch.
     /// Returns true when the Twitch send path must not run.
     bool tryInterceptShadowSend(const QString &parsedMessage, bool &sent);
-    void addShadowChatLine(const QString &login, const QString &text);
+    void addShadowChatLine(const QString &login, const QString &text,
+                           const QColor &usernameColor = {});
     bool isMod() const override;
     bool isVip() const;
     bool isStaff() const;

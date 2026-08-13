@@ -15,7 +15,6 @@
 #include <QTimer>
 
 #include <optional>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace chatterino {
@@ -37,11 +36,10 @@ public:
     void unsubscribeChannel(const QString &roomId);
 
     /// Publish text to a room. Returns false if the socket is not authenticated.
-    /// Local echo should wait for `publishAck`.
-    bool publish(const QString &roomId, const QString &text, const QString &id);
+    bool publish(const QString &roomId, const QString &text, const QString &id,
+                 const QString &color = {});
 
     pajlada::Signals::Signal<ShadowWireEvent> messageReceived;
-    pajlada::Signals::Signal<ShadowWireEvent> localEcho;
     pajlada::Signals::Signal<QString> publishAck;
     pajlada::Signals::NoArgSignal authenticated;
     pajlada::Signals::NoArgSignal disconnected;
@@ -69,7 +67,6 @@ private:
     WebSocketHandle socket_;
     std::unordered_set<QString> rooms_;
     std::unordered_set<QString> pendingIds_;
-    std::unordered_map<QString, std::pair<QString, QString>> pendingEcho_;
     QString validatedLogin_;
     bool open_ = false;
     bool authenticating_ = false;

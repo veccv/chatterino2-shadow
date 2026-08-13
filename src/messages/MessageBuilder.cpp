@@ -471,6 +471,17 @@ EmotePtr parseEmote(TwitchChannel *twitchChannel, const EmoteName &name)
     //  - BetterTTV Global
     //  - 7TV Global
 
+    const auto &raw = name.string;
+    if (raw.size() >= 3 && raw.front() == u':' && raw.back() == u':')
+    {
+        auto inner = parseEmote(
+            twitchChannel, EmoteName{raw.sliced(1, raw.size() - 2)});
+        if (inner)
+        {
+            return inner;
+        }
+    }
+
     const auto *globalFfzEmotes = getApp()->getFfzEmotes();
     const auto *globalBttvEmotes = getApp()->getBttvEmotes();
     const auto *globalSeventvEmotes = getApp()->getSeventvEmotes();
@@ -520,6 +531,15 @@ EmotePtr parseEmote(TwitchChannel *twitchChannel, const EmoteName &name)
         return *emote;
     }
 
+    if (twitchChannel != nullptr)
+    {
+        emote = twitchChannel->twitchEmote(name);
+        if (emote)
+        {
+            return *emote;
+        }
+    }
+
     return {};
 }
 
@@ -554,19 +574,35 @@ MessagePtr makeSystemMessage(const QString &text, const QTime &time)
 }
 
 MessagePtr MessageBuilder::makeShadowChatMessage(const QString &login,
-                                                 const QString &text)
+                                                 const QString &text,
+                                                 TwitchChannel *channel,
+                                                 const QColor &usernameColor)
 {
     MessageBuilder builder;
+    if (usernameColor.isValid())
+    {
+        builder.usernameColor_ = usernameColor;
+        builder.message().usernameColor = usernameColor;
+    }
+
     builder.emplace<TimestampElement>();
     builder.appendShadowMark();
-    builder.emplace<TextElement>(login, MessageElementFlag::Username)
+
+    MessageColor nickColor = usernameColor.isValid()
+                                 ? MessageColor(usernameColor)
+                                 : MessageColor(builder.usernameColor_);
+    builder
+        .emplace<TextElement>(login + u":"_s, MessageElementFlag::Username,
+                              nickColor, FontStyle::ChatMediumBold)
         ->setLink({Link::UserInfo, login});
-    builder.emplace<TextElement>(u":"_s, MessageElementFlag::Username);
-    builder.emplace<TextElement>(text, MessageElementFlag::Text);
+
+    MessageBuilder::TextState textState{.twitchChannel = channel};
+    builder.addWords(text.split(u' '), {}, textState);
+
     builder->loginName = login;
     builder->displayName = login;
     builder->messageText = text;
-    builder->searchText = QStringLiteral("[shadow] %1: %2").arg(login, text);
+    builder->searchText = QStringLiteral("Shadow user %1: %2").arg(login, text);
     builder->flags.set(MessageFlag::DoNotTriggerNotification);
     return builder.release();
 }
@@ -2621,12 +2657,14 @@ void MessageBuilder::appendTwitchBadges(Communi::TagsRef tags,
 void MessageBuilder::appendShadowMark()
 {
     this->message().flags.set(MessageFlag::ShadowMessage);
-    this->emplace<TextElement>(
-            QStringLiteral("[shadow]"),
-            MessageElementFlags{MessageElementFlag::AlwaysShow,
-                                MessageElementFlag::Text},
-            MessageColor::System)
-        ->setTooltip(QStringLiteral("Shadow chat"));
+    this->emplace<BadgeElement>(
+        std::make_shared<Emote>(Emote{
+            .name = EmoteName{},
+            .images = ImageSet{Image::fromResourcePixmap(
+                getResources().twitch.shadowUser, 18.F / 32.F)},
+            .tooltip = Tooltip{QStringLiteral("Shadow user")},
+        }),
+        MessageElementFlag::AlwaysShow);
 }
 
 void MessageBuilder::appendChatterinoBadges(const QString &userID)

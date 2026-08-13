@@ -795,13 +795,13 @@ TEST_F(IrcRestriction, SelfPartSetsBanned)
     ASSERT_EQ(this->app->accounts.twitch.getCurrent()->getUserName(), before);
 }
 
-TEST_F(IrcRestriction, SelfJoinClearsBanned)
+TEST_F(IrcRestriction, SelfJoinDoesNotClearBanned)
 {
     this->channel->setRestriction(ChannelRestriction::Banned);
     this->handle(
         ":justinfan64537!justinfan64537@justinfan64537.tmi.twitch.tv JOIN "
         "#pajlada");
-    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::None);
+    ASSERT_EQ(this->channel->restriction(), ChannelRestriction::Banned);
 }
 
 TEST_F(IrcRestriction, SelfJoinDoesNotClearTimedOut)

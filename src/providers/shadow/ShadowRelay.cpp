@@ -150,7 +150,7 @@ void ShadowRelay::unsubscribeChannel(const QString &roomId)
 }
 
 bool ShadowRelay::publish(const QString &roomId, const QString &text,
-                          const QString &id)
+                          const QString &id, const QString &color)
 {
     assertInGuiThread();
     if (!this->isAuthenticated() || roomId.isEmpty() || text.isEmpty() ||
@@ -160,8 +160,7 @@ bool ShadowRelay::publish(const QString &roomId, const QString &text,
     }
 
     this->pendingIds_.insert(id);
-    this->pendingEcho_.insert({id, {roomId, text}});
-    this->socket_.sendText(encodeShadowPublish(roomId, id, text));
+    this->socket_.sendText(encodeShadowPublish(roomId, id, text, color));
     return true;
 }
 
@@ -205,7 +204,6 @@ void ShadowRelay::resetSocket()
     this->authenticating_ = false;
     this->validatedLogin_.clear();
     this->pendingIds_.clear();
-    this->pendingEcho_.clear();
     this->socket_.close();
     if (wasAuthenticated)
     {
@@ -291,18 +289,6 @@ void ShadowRelay::handleText(int generation, const QByteArray &data)
             break;
         case ShadowWireEvent::Kind::Ack: {
             this->pendingIds_.erase(event->id);
-            auto echoIt = this->pendingEcho_.find(event->id);
-            if (echoIt != this->pendingEcho_.end())
-            {
-                ShadowWireEvent echo;
-                echo.kind = ShadowWireEvent::Kind::Message;
-                echo.roomId = echoIt->second.first;
-                echo.login = this->validatedLogin_;
-                echo.id = event->id;
-                echo.text = echoIt->second.second;
-                this->pendingEcho_.erase(echoIt);
-                this->localEcho.invoke(echo);
-            }
             this->publishAck.invoke(event->id);
             break;
         }
@@ -310,7 +296,6 @@ void ShadowRelay::handleText(int generation, const QByteArray &data)
             if (isPendingShadowEcho(event->id, this->pendingIds_))
             {
                 this->pendingIds_.erase(event->id);
-                this->pendingEcho_.erase(event->id);
                 break;
             }
             this->messageReceived.invoke(*event);
@@ -335,7 +320,6 @@ void ShadowRelay::handleClose(int generation)
     this->authenticating_ = false;
     this->validatedLogin_.clear();
     this->pendingIds_.clear();
-    this->pendingEcho_.clear();
     this->disconnected.invoke();
     if (wasOpen)
     {

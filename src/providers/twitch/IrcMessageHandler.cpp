@@ -31,6 +31,7 @@
 #include "util/IrcHelpers.hpp"
 
 #include <IrcMessage>
+#include <QColor>
 #include <QLocale>
 #include <QStringBuilder>
 
@@ -410,11 +411,13 @@ void IrcMessageHandler::parsePrivMessageInto(
             channel->setStaff(parsedBadges.contains("staff"));
         }
 
-        if (!channel->isLoadingRecentMessages())
+        if (!channel->isLoadingRecentMessages() &&
+            !currentUser->getUserId().isEmpty())
         {
             // Clear the send wait timer when we are able to send a message
             channel->setSendWait(0);
-            if (channel->restriction() == ChannelRestriction::TimedOut)
+            if (channel->restriction() == ChannelRestriction::TimedOut ||
+                channel->restriction() == ChannelRestriction::Banned)
             {
                 channel->setRestriction(ChannelRestriction::None);
             }
@@ -666,6 +669,13 @@ void IrcMessageHandler::handleUserStateMessage(Communi::IrcMessage *message)
         if (tc->hasHighRateLimit())
         {
             tc->setSendWait(0);
+        }
+
+        auto colorTag = message->tag("color").toString();
+        if (!colorTag.isEmpty())
+        {
+            getApp()->getAccounts()->twitch.getCurrent()->setColor(
+                QColor(colorTag));
         }
     }
 }
@@ -1065,10 +1075,6 @@ void IrcMessageHandler::handleJoinMessage(Communi::IrcMessage *message)
     if (message->nick() ==
         getApp()->getAccounts()->twitch.getCurrent()->getUserName())
     {
-        if (twitchChannel->restriction() == ChannelRestriction::Banned)
-        {
-            twitchChannel->setRestriction(ChannelRestriction::None);
-        }
         twitchChannel->addSystemMessage("joined channel");
         twitchChannel->joined.invoke();
     }

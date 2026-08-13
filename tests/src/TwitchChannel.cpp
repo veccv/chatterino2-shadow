@@ -6,15 +6,21 @@
 #include "providers/twitch/TwitchChannel.hpp"
 
 #include "controllers/accounts/AccountController.hpp"
+#include "messages/Emote.hpp"
 #include "messages/Message.hpp"
 #include "messages/MessageBuilder.hpp"
 #include "messages/MessageElement.hpp"
 #include "messages/MessageFlag.hpp"
 #include "mocks/BaseApplication.hpp"
+#include "mocks/EmoteController.hpp"
 #include "mocks/Logging.hpp"
 #include "mocks/TwitchIrcServer.hpp"
+#include "providers/bttv/BttvEmotes.hpp"
+#include "providers/ffz/FfzEmotes.hpp"
+#include "providers/seventv/SeventvEmotes.hpp"
 #include "Test.hpp"
 
+#include <QColor>
 #include <QString>
 #include <QtCore/qtestsupport_core.h>
 
@@ -38,6 +44,26 @@ public:
         return &this->twitch;
     }
 
+    EmoteController *getEmotes() override
+    {
+        return &this->emotes;
+    }
+
+    BttvEmotes *getBttvEmotes() override
+    {
+        return &this->bttvEmotes;
+    }
+
+    FfzEmotes *getFfzEmotes() override
+    {
+        return &this->ffzEmotes;
+    }
+
+    SeventvEmotes *getSeventvEmotes() override
+    {
+        return &this->seventvEmotes;
+    }
+
     ILogging *getChatLogger() override
     {
         return &this->logging;
@@ -46,6 +72,10 @@ public:
     AccountController accounts;
     mock::MockTwitchIrcServer twitch;
     mock::EmptyLogging logging;
+    mock::EmoteController emotes;
+    BttvEmotes bttvEmotes;
+    FfzEmotes ffzEmotes;
+    SeventvEmotes seventvEmotes;
 };
 
 class TwitchChannelRestriction : public ::testing::Test
@@ -277,6 +307,115 @@ TEST_F(TwitchChannelRestriction, IncomingShadowLineIsMarked)
     ASSERT_TRUE(messages[0]->flags.has(MessageFlag::ShadowMessage));
     ASSERT_EQ(messages[0]->loginName, "pajlada");
     ASSERT_EQ(messages[0]->messageText, "still here");
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineUsesBadgeInsteadOfText)
+{
+    this->channel->addShadowChatLine("pajlada", "still here");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+
+    bool foundShadowBadge = false;
+    bool foundShadowText = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        if (dynamic_cast<const BadgeElement *>(element.get()) != nullptr &&
+            element->getTooltip() == QStringLiteral("Shadow user"))
+        {
+            foundShadowBadge = true;
+        }
+        auto *text = dynamic_cast<const TextElement *>(element.get());
+        if (text != nullptr &&
+            text->words().contains(QStringLiteral("[shadow]")))
+        {
+            foundShadowText = true;
+        }
+    }
+    EXPECT_TRUE(foundShadowBadge);
+    EXPECT_FALSE(foundShadowText);
+    EXPECT_TRUE(
+        messages[0]->searchText.startsWith(QStringLiteral("Shadow user ")));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineUsesNickColor)
+{
+    this->channel->addShadowChatLine("pajlada", "Kappa", QColor("#FF69B4"));
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0]->usernameColor, QColor("#FF69B4"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineRendersNamedEmote)
+{
+    auto map = std::make_shared<EmoteMap>();
+    EmoteName name{QStringLiteral("Kappa")};
+    map->emplace(name, std::make_shared<Emote>(Emote{.name = name}));
+    this->channel->setBttvEmotes(std::shared_ptr<const EmoteMap>(map));
+    this->channel->addShadowChatLine("pajlada", "hello Kappa");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    bool foundEmote = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        if (dynamic_cast<const EmoteElement *>(element.get()) != nullptr)
+        {
+            foundEmote = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundEmote);
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineRendersColonWrappedEmote)
+{
+    auto map = std::make_shared<EmoteMap>();
+    EmoteName name{QStringLiteral("Kappa")};
+    map->emplace(name, std::make_shared<Emote>(Emote{.name = name}));
+    this->channel->setBttvEmotes(std::shared_ptr<const EmoteMap>(map));
+    this->channel->addShadowChatLine("pajlada", ":Kappa:");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    bool foundEmote = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        if (dynamic_cast<const EmoteElement *>(element.get()) != nullptr)
+        {
+            foundEmote = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundEmote);
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineRendersMentionAndEmote)
+{
+    auto map = std::make_shared<EmoteMap>();
+    EmoteName name{QStringLiteral("FeelsWeirdMan")};
+    map->emplace(name, std::make_shared<Emote>(Emote{.name = name}));
+    this->channel->setBttvEmotes(std::shared_ptr<const EmoteMap>(map));
+    this->channel->addShadowChatLine("pajlada", "@forsen FeelsWeirdMan");
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    bool foundEmote = false;
+    bool foundMention = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        if (dynamic_cast<const EmoteElement *>(element.get()) != nullptr)
+        {
+            foundEmote = true;
+        }
+        if (dynamic_cast<const MentionElement *>(element.get()) != nullptr)
+        {
+            foundMention = true;
+        }
+    }
+    EXPECT_TRUE(foundEmote);
+    EXPECT_TRUE(foundMention);
 }
 
 TEST_F(TwitchChannelRestriction, BannedArmsGhostWatch)

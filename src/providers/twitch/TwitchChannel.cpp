@@ -192,14 +192,8 @@ TwitchChannel::TwitchChannel(const QString &name)
             relay->messageReceived, [this](const ShadowWireEvent &ev) {
                 if (!ev.roomId.isEmpty() && ev.roomId == this->roomId())
                 {
-                    this->addShadowChatLine(ev.login, ev.text);
-                }
-            });
-        this->signalHolder_.managedConnect(
-            relay->localEcho, [this](const ShadowWireEvent &ev) {
-                if (!ev.roomId.isEmpty() && ev.roomId == this->roomId())
-                {
-                    this->addShadowChatLine(ev.login, ev.text);
+                    this->addShadowChatLine(ev.login, ev.text,
+                                            QColor(ev.color));
                 }
             });
     }
@@ -887,13 +881,6 @@ void TwitchChannel::sendMessage(const QString &message)
         return;
     }
 
-    if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
-    {
-        this->addSystemMessage(QString("%1 is not a known command.")
-                                   .arg(parsedMessage.split(' ').first()));
-        return;
-    }
-
     bool messageSent = false;
     if (this->tryInterceptShadowSend(parsedMessage, messageSent))
     {
@@ -901,6 +888,13 @@ void TwitchChannel::sendMessage(const QString &message)
         {
             this->lastSentMessage_ = parsedMessage;
         }
+        return;
+    }
+
+    if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
+    {
+        this->addSystemMessage(QString("%1 is not a known command.")
+                                   .arg(parsedMessage.split(' ').first()));
         return;
     }
 
@@ -938,13 +932,6 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         return;
     }
 
-    if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
-    {
-        this->addSystemMessage(QString("%1 is not a known command.")
-                                   .arg(parsedMessage.split(' ').first()));
-        return;
-    }
-
     bool messageSent = false;
     if (this->tryInterceptShadowSend(parsedMessage, messageSent))
     {
@@ -952,6 +939,13 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         {
             this->lastSentMessage_ = parsedMessage;
         }
+        return;
+    }
+
+    if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
+    {
+        this->addSystemMessage(QString("%1 is not a known command.")
+                                   .arg(parsedMessage.split(' ').first()));
         return;
     }
 
@@ -985,7 +979,13 @@ bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
     }
 
     auto id = generateUuid();
-    if (!relay->publish(this->roomId(), parsedMessage, id))
+    QString color;
+    auto account = getApp()->getAccounts()->twitch.getCurrent();
+    if (account->color().isValid())
+    {
+        color = account->color().name(QColor::HexRgb);
+    }
+    if (!relay->publish(this->roomId(), parsedMessage, id, color))
     {
         this->addSystemMessage(
             QStringLiteral("Couldn't send to shadow chat."));
@@ -993,14 +993,42 @@ bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
         return true;
     }
 
+    qCDebug(chatterinoShadow)
+        << "[TwitchChannel" << this->getName()
+        << "] Shadow send:" << parsedMessage;
+    auto login = relay->validatedLogin();
+    if (login.isEmpty())
+    {
+        login = account->getUserName();
+    }
+    this->addShadowChatLine(login, parsedMessage, account->color());
     sent = true;
     return true;
 }
 
-void TwitchChannel::addShadowChatLine(const QString &login, const QString &text)
+void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
+                                      const QColor &usernameColor)
 {
-    this->addMessage(MessageBuilder::makeShadowChatMessage(login, text),
-                     MessageContext::Original);
+    QColor nickColor = usernameColor;
+    if (!nickColor.isValid())
+    {
+        nickColor = this->getUserColor(login);
+    }
+    if (!nickColor.isValid())
+    {
+        auto current = getApp()->getAccounts()->twitch.getCurrent();
+        if (current->getUserName().compare(login, Qt::CaseInsensitive) == 0)
+        {
+            nickColor = current->color();
+        }
+    }
+    if (nickColor.isValid())
+    {
+        this->setUserColor(login, nickColor);
+    }
+    this->addMessage(
+        MessageBuilder::makeShadowChatMessage(login, text, this, nickColor),
+        MessageContext::Original);
 }
 
 bool TwitchChannel::isMod() const

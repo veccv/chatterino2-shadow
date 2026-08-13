@@ -84,3 +84,27 @@ TEST(ShadowProtocol, LiveOnlyHasNoHistoryField)
     ASSERT_TRUE(message.has_value());
     EXPECT_TRUE(message->reason.isEmpty());
 }
+
+TEST(ShadowProtocol, EncodePublishKeepsEmojiAndEmoteName)
+{
+    auto publish = encodeShadowPublish(u"1"_s, u"id-1"_s, u"Kappa 😂 :tf:"_s);
+    auto json = QJsonDocument::fromJson(publish).object();
+    EXPECT_EQ(json.value(u"text"_s).toString(), u"Kappa 😂 :tf:"_s);
+}
+
+TEST(ShadowProtocol, EncodePublishIncludesColor)
+{
+    auto publish =
+        encodeShadowPublish(u"1"_s, u"id-1"_s, u"Kappa"_s, u"#FF69B4"_s);
+    auto json = QJsonDocument::fromJson(publish).object();
+    EXPECT_EQ(json.value(u"color"_s).toString(), u"#FF69B4"_s);
+}
+
+TEST(ShadowProtocol, ParseMessageColor)
+{
+    auto message = parseShadowWire(
+        R"({"op":"message","room":"1","login":"pajlada","id":"abc","text":"Kappa","color":"#FF69B4"})");
+    ASSERT_TRUE(message.has_value());
+    EXPECT_EQ(message->color, u"#FF69B4"_s);
+    EXPECT_EQ(message->text, u"Kappa"_s);
+}

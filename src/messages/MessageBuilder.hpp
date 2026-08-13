@@ -11,6 +11,7 @@
 
 #include <IrcMessage>
 #include <IrcTagsRef>
+#include <QColor>
 #include <QRegularExpression>
 #include <QString>
 #include <QTime>
@@ -261,7 +262,9 @@ public:
         const TwitchChannel &channel, const HelixPinnedChatMessage &pin);
 
     static MessagePtr makeShadowChatMessage(const QString &login,
-                                            const QString &text);
+                                            const QString &text,
+                                            TwitchChannel *channel = nullptr,
+                                            const QColor &usernameColor = {});
 
 private:
     struct TextState {

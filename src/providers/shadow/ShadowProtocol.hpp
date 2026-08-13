@@ -28,6 +28,7 @@ struct ShadowWireEvent {
     QString roomId;
     QString id;
     QString text;
+    QString color;
     QString reason;
 };
 
@@ -48,13 +49,18 @@ inline QByteArray encodeShadowLeave(const QString &roomId)
 }
 
 inline QByteArray encodeShadowPublish(const QString &roomId, const QString &id,
-                                      const QString &text)
+                                      const QString &text,
+                                      const QString &color = {})
 {
     QJsonObject root;
     root.insert(QStringLiteral("op"), QStringLiteral("publish"));
     root.insert(QStringLiteral("room"), roomId);
     root.insert(QStringLiteral("id"), id);
     root.insert(QStringLiteral("text"), text);
+    if (!color.isEmpty())
+    {
+        root.insert(QStringLiteral("color"), color);
+    }
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
@@ -98,6 +104,7 @@ inline std::optional<ShadowWireEvent> parseShadowWire(const QByteArray &data)
         event.login = root.value(QStringLiteral("login")).toString();
         event.id = root.value(QStringLiteral("id")).toString();
         event.text = root.value(QStringLiteral("text")).toString();
+        event.color = root.value(QStringLiteral("color")).toString();
         if (event.roomId.isEmpty() || event.login.isEmpty() ||
             event.id.isEmpty())
         {

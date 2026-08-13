@@ -95,16 +95,17 @@ void sendHelixMessage(const std::shared_ptr<TwitchChannel> &channel,
                 chan->addSystemMessage("Your message was not sent.");
             }
         },
-        [weak = std::weak_ptr(channel)](auto error, auto message) {
+        [weak = std::weak_ptr(channel), chatText = message](
+            auto error, auto helixMessage) {
             auto chan = weak.lock();
             if (!chan)
             {
                 return;
             }
 
-            if (message.isEmpty())
+            if (helixMessage.isEmpty())
             {
-                message = "(empty message)";
+                helixMessage = "(empty message)";
             }
 
             using Error = decltype(error);
@@ -115,23 +116,34 @@ void sendHelixMessage(const std::shared_ptr<TwitchChannel> &channel,
                     case Error::MissingText:
                         return "You can't send an empty message.";
                     case Error::BadRequest:
-                        return "Failed to send message: " + message;
-                    case Error::Forbidden:
+                        return "Failed to send message: " + helixMessage;
+                    case Error::Forbidden: {
+                        chan->setRestriction(ChannelRestriction::Banned);
+                        bool sent = false;
+                        if (chan->tryInterceptShadowSend(chatText, sent) &&
+                            sent)
+                        {
+                            return {};
+                        }
                         return "You are not allowed to send messages in this "
                                "channel.";
+                    }
                     case Error::MessageTooLarge:
                         return "Your message was too long.";
                     case Error::UserMissingScope:
                         return "Missing required scope. Re-login with your "
                                "account and try again.";
                     case Error::Forwarded:
-                        return message;
+                        return helixMessage;
                     case Error::Unknown:
                     default:
-                        return "Unknown error: " + message;
+                        return "Unknown error: " + helixMessage;
                 }
             }();
-            chan->addSystemMessage(errorMessage);
+            if (!errorMessage.isEmpty())
+            {
+                chan->addSystemMessage(errorMessage);
+            }
         });
 }
 
