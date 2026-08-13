@@ -31,6 +31,7 @@
 #include "util/IrcHelpers.hpp"
 
 #include <IrcMessage>
+#include <QColor>
 #include <QLocale>
 #include <QStringBuilder>
 
@@ -410,10 +411,16 @@ void IrcMessageHandler::parsePrivMessageInto(
             channel->setStaff(parsedBadges.contains("staff"));
         }
 
-        if (!channel->isLoadingRecentMessages())
+        if (!channel->isLoadingRecentMessages() &&
+            !currentUser->getUserId().isEmpty())
         {
             // Clear the send wait timer when we are able to send a message
             channel->setSendWait(0);
+            if (channel->restriction() == ChannelRestriction::TimedOut ||
+                channel->restriction() == ChannelRestriction::Banned)
+            {
+                channel->setRestriction(ChannelRestriction::None);
+            }
 
             // Update send wait timer with slow mode timeout if this user is not a mod or vip.
             if (!channel->hasHighRateLimit())
@@ -530,16 +537,21 @@ void IrcMessageHandler::handleClearChatMessage(Communi::IrcMessage *message)
             getApp()->getAccounts()->twitch.getCurrent()->getUserName();
         if (currentUsername == clearChat.username)
         {
-            bool ok = false;
-            int remainingTime =
-                message->tags().getOrEmpty("ban-duration").toInt(&ok);
-            if (ok)
+            auto *tc = dynamic_cast<TwitchChannel *>(chan.get());
+            assert(tc != nullptr);
+            if (tc != nullptr)
             {
-                auto *tc = dynamic_cast<TwitchChannel *>(chan.get());
-                assert(tc != nullptr);
-                if (tc != nullptr)
+                bool ok = false;
+                int remainingTime =
+                    message->tags().getOrEmpty("ban-duration").toInt(&ok);
+                if (ok)
                 {
+                    tc->setTimedOut(remainingTime);
                     tc->setSendWait(remainingTime);
+                }
+                else
+                {
+                    tc->setRestriction(ChannelRestriction::Banned);
                 }
             }
         }
@@ -657,6 +669,13 @@ void IrcMessageHandler::handleUserStateMessage(Communi::IrcMessage *message)
         if (tc->hasHighRateLimit())
         {
             tc->setSendWait(0);
+        }
+
+        auto colorTag = message->tag("color").toString();
+        if (!colorTag.isEmpty())
+        {
+            getApp()->getAccounts()->twitch.getCurrent()->setColor(
+                QColor(colorTag));
         }
     }
 }
@@ -1020,7 +1039,26 @@ void IrcMessageHandler::handleNoticeMessage(Communi::IrcNoticeMessage *message)
     {
         // Notice received when the user sends a message while timed out.
         // @msg-id=msg_timedout :tmi.twitch.tv NOTICE #twitch :You are timed out for 3600 more seconds.
-        handleSendWait(message->content().split(u' ').value(5));
+        auto remaining = message->content().split(u' ').value(5);
+        handleSendWait(remaining);
+        auto *tc = dynamic_cast<TwitchChannel *>(channel.get());
+        if (tc != nullptr)
+        {
+            bool ok = false;
+            int seconds = remaining.toInt(&ok);
+            if (ok)
+            {
+                tc->setTimedOut(seconds);
+            }
+        }
+    }
+    else if (message->content().startsWith("You are permanently banned "))
+    {
+        auto *tc = dynamic_cast<TwitchChannel *>(channel.get());
+        if (tc != nullptr)
+        {
+            tc->setRestriction(ChannelRestriction::Banned);
+        }
     }
 }
 
@@ -1070,6 +1108,7 @@ void IrcMessageHandler::handlePartMessage(Communi::IrcMessage *message)
 
     if (message->nick() == selfAccountName)
     {
+        twitchChannel->setRestriction(ChannelRestriction::Banned);
         channel->addMessage(generateBannedMessage(false),
                             MessageContext::Original);
     }

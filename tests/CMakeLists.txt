@@ -28,6 +28,7 @@ set(test_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/LimitedQueue.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/BasicPubSub.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/SeventvEventAPI.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/ShadowRelay.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/BttvLiveUpdates.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/Updates.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/Filters.cpp
@@ -59,6 +60,7 @@ set(test_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/NativeMessaging.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ImageUploader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/TwitchChannel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/WindowDescriptors.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/TwitchUserColor.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/FunctionRef.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/InputHighlighter.cpp

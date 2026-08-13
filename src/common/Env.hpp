@@ -33,6 +33,10 @@ public:
     const bool twitchServerSecure;
     const std::optional<QString> proxyUrl;
 
+    /// Compiled-in shadow overlay relay. Not a user setting.
+    /// Override with CHATTERINO2_SHADOW_RELAY_URL for operator testing only.
+    const QString shadowRelayUrl;
+
     /// Log output from the application to a file at the given path
     const QString logToFile;
 };

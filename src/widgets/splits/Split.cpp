@@ -12,6 +12,7 @@
 #include "controllers/commands/CommandController.hpp"
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "controllers/notifications/NotificationController.hpp"
+#include "providers/shadow/ShadowRelay.hpp"
 #include "providers/twitch/TwitchAccount.hpp"
 #include "providers/twitch/TwitchChannel.hpp"
 #include "providers/twitch/TwitchIrcServer.hpp"
@@ -866,6 +867,23 @@ void Split::setChannel(IndirectChannel newChannel)
                 this->getInput().setSendWaitStatus(text);
             });
 
+        this->channelSignalHolder_.managedConnect(tc->restrictionChanged,
+                                                  [this] {
+                                                      this->updateRestrictionStatus();
+                                                  });
+        if (auto *relay = getApp()->getShadowRelay())
+        {
+            this->channelSignalHolder_.managedConnect(relay->disconnected,
+                                                      [this] {
+                                                          this->updateRestrictionStatus();
+                                                      });
+            this->channelSignalHolder_.managedConnect(relay->authenticated,
+                                                      [this] {
+                                                          this->updateRestrictionStatus();
+                                                      });
+        }
+        this->updateRestrictionStatus();
+
         this->channelSignalHolder_.managedConnect(
             tc->sharedChatStatusChanged,
             [this](const std::vector<HelixMinimalUser> &) {
@@ -876,6 +894,7 @@ void Split::setChannel(IndirectChannel newChannel)
     else
     {
         this->pinnedBanner_->setChannel(nullptr);
+        this->updateRestrictionStatus();
     }
 
     this->indirectChannelChangedConnection_ =
@@ -925,6 +944,53 @@ void Split::setModerationMode(bool value)
 bool Split::getModerationMode() const
 {
     return this->moderationMode_;
+}
+
+void Split::setShadowViewMode(ShadowViewMode mode)
+{
+    if (this->shadowViewMode_ == mode)
+    {
+        return;
+    }
+
+    this->shadowViewMode_ = mode;
+    this->view_->refreshFilteredMessages();
+    this->header_->updateShadowViewButton();
+    getApp()->getWindows()->queueSave();
+}
+
+ShadowViewMode Split::getShadowViewMode() const
+{
+    return this->shadowViewMode_;
+}
+
+void Split::updateRestrictionStatus()
+{
+    auto *tc = dynamic_cast<TwitchChannel *>(this->channel_.get().get());
+    if (tc == nullptr)
+    {
+        this->input_->setRestrictionStatus({});
+        return;
+    }
+
+    auto restriction = tc->restriction();
+    if (restriction != ChannelRestriction::Banned &&
+        restriction != ChannelRestriction::TimedOut)
+    {
+        this->input_->setRestrictionStatus({});
+        return;
+    }
+
+    auto *relay = getApp()->getShadowRelay();
+    if (relay == nullptr || !relay->isAuthenticated())
+    {
+        this->input_->setRestrictionStatus(
+            QStringLiteral("Shadow chat disconnected"));
+        return;
+    }
+
+    this->input_->setRestrictionStatus(
+        QStringLiteral("Sends go to shadow chat"));
 }
 
 std::optional<bool> Split::checkSpellingOverride() const
@@ -1366,6 +1432,7 @@ SplitDescriptor Split::buildDescriptor() const
     descriptor.moderationMode_ = this->getModerationMode();
     descriptor.filters_ = this->getFilters();
     descriptor.spellCheckOverride = this->checkSpellingOverride();
+    descriptor.shadowViewMode_ = this->getShadowViewMode();
 
     auto chan = this->getIndirectChannel();
     descriptor.type_ = qmagicenum::enumNameString(chan.getType());

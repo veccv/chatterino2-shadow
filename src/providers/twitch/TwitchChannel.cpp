@@ -31,6 +31,7 @@
 #include "providers/seventv/SeventvAPI.hpp"
 #include "providers/seventv/SeventvEmotes.hpp"
 #include "providers/seventv/SeventvEventAPI.hpp"
+#include "providers/shadow/ShadowRelay.hpp"
 #include "providers/twitch/api/Helix.hpp"
 #include "providers/twitch/ChannelPointReward.hpp"
 #include "providers/twitch/eventsub/Controller.hpp"
@@ -145,6 +146,7 @@ TwitchChannel::TwitchChannel(const QString &name)
             this->setMod(false);
             this->refreshPubSub();
             this->refreshTwitchChannelEmotes(false);
+            this->listenShadowRelay();
         });
 
     this->refreshPubSub();
@@ -183,6 +185,18 @@ TwitchChannel::TwitchChannel(const QString &name)
         this->cleanUpReplyThreads();
     });
     this->threadClearTimer_.start(5 * 60 * 1000);
+
+    if (auto *relay = getApp()->getShadowRelay())
+    {
+        this->signalHolder_.managedConnect(
+            relay->messageReceived, [this](const ShadowWireEvent &ev) {
+                if (!ev.roomId.isEmpty() && ev.roomId == this->roomId())
+                {
+                    this->addShadowChatLine(ev.login, ev.text,
+                                            QColor(ev.color));
+                }
+            });
+    }
 
     QObject::connect(&this->nextSharedChatSessionUpdateTimer_, &QTimer::timeout,
                      &this->lifetimeGuard_, [this] {
@@ -224,6 +238,15 @@ TwitchChannel::TwitchChannel(const QString &name)
                          this->syncSendWaitTimer();
                      });
 
+    this->restrictionClearTimer_.setSingleShot(true);
+    QObject::connect(&this->restrictionClearTimer_, &QTimer::timeout,
+                     &this->lifetimeGuard_, [this] {
+                         if (this->restriction_ == ChannelRestriction::TimedOut)
+                         {
+                             this->setRestriction(ChannelRestriction::None);
+                         }
+                     });
+
     // debugging
 #if 0
     for (int i = 0; i < 1000; i++) {
@@ -251,6 +274,11 @@ TwitchChannel::~TwitchChannel()
     {
         getApp()->getSeventvEventAPI()->unsubscribeTwitchChannel(
             this->roomId());
+    }
+
+    if (getApp()->getShadowRelay())
+    {
+        getApp()->getShadowRelay()->unsubscribeChannel(this->roomId());
     }
 
     this->destroyed.invoke();
@@ -778,6 +806,7 @@ void TwitchChannel::roomIdChanged()
     this->refreshSevenTVChannelEmotes(false);
     this->joinBttvChannel();
     this->listenSevenTVCosmetics();
+    this->listenShadowRelay();
     getApp()->getTwitchLiveController()->add(this->sharedFromThis());
     this->refreshPinnedMessage();
 }
@@ -852,6 +881,16 @@ void TwitchChannel::sendMessage(const QString &message)
         return;
     }
 
+    bool messageSent = false;
+    if (this->tryInterceptShadowSend(parsedMessage, messageSent))
+    {
+        if (messageSent)
+        {
+            this->lastSentMessage_ = parsedMessage;
+        }
+        return;
+    }
+
     if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
     {
         this->addSystemMessage(QString("%1 is not a known command.")
@@ -859,7 +898,6 @@ void TwitchChannel::sendMessage(const QString &message)
         return;
     }
 
-    bool messageSent = false;
     this->sendMessageSignal.invoke(parsedMessage, messageSent);
     this->updateBttvActivity();
     this->updateSevenTVActivity();
@@ -894,6 +932,16 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         return;
     }
 
+    bool messageSent = false;
+    if (this->tryInterceptShadowSend(parsedMessage, messageSent))
+    {
+        if (messageSent)
+        {
+            this->lastSentMessage_ = parsedMessage;
+        }
+        return;
+    }
+
     if (getSettings()->shouldSendHelixChat() && isUnknownCommand(parsedMessage))
     {
         this->addSystemMessage(QString("%1 is not a known command.")
@@ -901,7 +949,6 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         return;
     }
 
-    bool messageSent = false;
     this->sendReplySignal.invoke(parsedMessage, replyId, messageSent);
 
     if (messageSent)
@@ -909,6 +956,79 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId)
         qCDebug(chatterinoTwitch) << "sent";
         this->lastSentMessage_ = parsedMessage;
     }
+}
+
+bool TwitchChannel::tryInterceptShadowSend(const QString &parsedMessage,
+                                           bool &sent)
+{
+    auto restriction = this->restriction();
+    if (restriction != ChannelRestriction::Banned &&
+        restriction != ChannelRestriction::TimedOut)
+    {
+        return false;
+    }
+
+    auto *relay = getApp()->getShadowRelay();
+    if (!relay || !relay->isAuthenticated() || this->roomId().isEmpty() ||
+        parsedMessage.isEmpty())
+    {
+        this->addSystemMessage(
+            QStringLiteral("Couldn't send to shadow chat."));
+        sent = false;
+        return true;
+    }
+
+    auto id = generateUuid();
+    QString color;
+    auto account = getApp()->getAccounts()->twitch.getCurrent();
+    if (account->color().isValid())
+    {
+        color = account->color().name(QColor::HexRgb);
+    }
+    if (!relay->publish(this->roomId(), parsedMessage, id, color))
+    {
+        this->addSystemMessage(
+            QStringLiteral("Couldn't send to shadow chat."));
+        sent = false;
+        return true;
+    }
+
+    qCDebug(chatterinoShadow)
+        << "[TwitchChannel" << this->getName()
+        << "] Shadow send:" << parsedMessage;
+    auto login = relay->validatedLogin();
+    if (login.isEmpty())
+    {
+        login = account->getUserName();
+    }
+    this->addShadowChatLine(login, parsedMessage, account->color());
+    sent = true;
+    return true;
+}
+
+void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
+                                      const QColor &usernameColor)
+{
+    QColor nickColor = usernameColor;
+    if (!nickColor.isValid())
+    {
+        nickColor = this->getUserColor(login);
+    }
+    if (!nickColor.isValid())
+    {
+        auto current = getApp()->getAccounts()->twitch.getCurrent();
+        if (current->getUserName().compare(login, Qt::CaseInsensitive) == 0)
+        {
+            nickColor = current->color();
+        }
+    }
+    if (nickColor.isValid())
+    {
+        this->setUserColor(login, nickColor);
+    }
+    this->addMessage(
+        MessageBuilder::makeShadowChatMessage(login, text, this, nickColor),
+        MessageContext::Original);
 }
 
 bool TwitchChannel::isMod() const
@@ -1003,8 +1123,14 @@ QString TwitchChannel::roomId() const
 
 void TwitchChannel::setRoomId(const QString &id)
 {
-    if (*this->roomID_.accessConst() != id)
+    auto previous = *this->roomID_.accessConst();
+    if (previous != id)
     {
+        if (auto *relay = getApp()->getShadowRelay();
+            relay && !previous.isEmpty())
+        {
+            relay->unsubscribeChannel(previous);
+        }
         *this->roomID_.access() = id;
         // This is intended for tests and benchmarks. See comment in constructor.
         if (!getApp()->isTest())
@@ -2505,6 +2631,15 @@ void TwitchChannel::listenSevenTVCosmetics() const
     }
 }
 
+void TwitchChannel::listenShadowRelay() const
+{
+    if (auto *relay = getApp()->getShadowRelay();
+        relay && !this->roomId().isEmpty())
+    {
+        relay->subscribeChannel(this->roomId());
+    }
+}
+
 void TwitchChannel::syncSendWaitTimer()
 {
     auto now = std::chrono::steady_clock::now();
@@ -2542,6 +2677,43 @@ void TwitchChannel::setSendWait(int seconds)
         this->sendWaitTimer_.start(1s);
         this->syncSendWaitTimer();
     }
+}
+
+ChannelRestriction TwitchChannel::restriction() const
+{
+    return this->restriction_;
+}
+
+void TwitchChannel::setRestriction(ChannelRestriction restriction)
+{
+    if (this->restriction_ == restriction)
+    {
+        return;
+    }
+
+    if (restriction != ChannelRestriction::TimedOut)
+    {
+        this->restrictionClearTimer_.stop();
+    }
+
+    this->restriction_ = restriction;
+    this->restrictionChanged.invoke();
+    if (auto *twitch = getApp()->getTwitch())
+    {
+        twitch->updateGhostWatch(this);
+    }
+}
+
+void TwitchChannel::setTimedOut(int seconds)
+{
+    if (seconds <= 0)
+    {
+        this->setRestriction(ChannelRestriction::None);
+        return;
+    }
+
+    this->setRestriction(ChannelRestriction::TimedOut);
+    this->restrictionClearTimer_.start(std::chrono::seconds(seconds));
 }
 
 bool TwitchChannel::isLoadingRecentMessages() const
