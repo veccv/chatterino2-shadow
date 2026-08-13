@@ -64,13 +64,71 @@ jobs:
             exit 0
           fi
 
+          is_protected() {
+            case "$1" in
+              README.md|.github/workflows|.github/workflows/*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          rebase_in_progress() {
+            [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]
+          }
+
+          resolve_protected_conflicts() {
+            local conflicted other="" f
+            conflicted="$(git diff --name-only --diff-filter=U || true)"
+            [ -n "${conflicted}" ] || return 1
+
+            while IFS= read -r f; do
+              [ -n "${f}" ] || continue
+              if is_protected "${f}"; then
+                # During rebase, --theirs is the commit being replayed (this fork).
+                if git checkout --theirs -- "${f}" 2>/dev/null; then
+                  git add -- "${f}"
+                else
+                  git rm -f -- "${f}" || true
+                fi
+              else
+                echo "Unresolved conflict: ${f}"
+                other=1
+              fi
+            done <<< "${conflicted}"
+
+            [ -z "${other}" ]
+          }
+
+          restore_protected() {
+            git rm -rf --ignore-unmatch .github/workflows
+            git checkout "${BEFORE}" -- README.md .github/workflows
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: keep local GitHub Actions and README after upstream rebase"
+            fi
+          }
+
           if ! git rebase "upstream/${UPSTREAM_BRANCH}"; then
-            git rebase --abort || true
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-            echo "conflict=true" >> "${GITHUB_OUTPUT}"
-            echo "::error::Rebase onto upstream/${UPSTREAM_BRANCH} failed due to conflicts."
-            exit 1
+            while rebase_in_progress; do
+              if ! resolve_protected_conflicts; then
+                git rebase --abort || true
+                echo "changed=false" >> "${GITHUB_OUTPUT}"
+                echo "conflict=true" >> "${GITHUB_OUTPUT}"
+                echo "::error::Rebase onto upstream/${UPSTREAM_BRANCH} failed due to conflicts."
+                exit 1
+              fi
+              if ! GIT_EDITOR=: git rebase --continue; then
+                if rebase_in_progress; then
+                  continue
+                fi
+                git rebase --abort || true
+                echo "changed=false" >> "${GITHUB_OUTPUT}"
+                echo "conflict=true" >> "${GITHUB_OUTPUT}"
+                echo "::error::Rebase onto upstream/${UPSTREAM_BRANCH} failed due to conflicts."
+                exit 1
+              fi
+            done
           fi
+
+          restore_protected
 
           AFTER="$(git rev-parse HEAD)"
           echo "Rebased HEAD:   ${AFTER}"
@@ -99,7 +157,7 @@ jobs:
           \`\`\`bash
           git fetch https://github.com/${UPSTREAM_REPO}.git ${UPSTREAM_BRANCH}
           git rebase FETCH_HEAD
-          # fix conflicts, then:
+          # fix conflicts (keep this fork's README.md and .github/workflows/), then:
           git push --force-with-lease origin master
           \`\`\`
           EOF
