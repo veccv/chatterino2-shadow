@@ -73,6 +73,13 @@ public:
     void setShadowViewMode(ShadowViewMode mode);
     ShadowViewMode getShadowViewMode() const;
 
+    void setShadowSendTarget(ShadowSendTarget target);
+    ShadowSendTarget getShadowSendTarget() const;
+
+    void sendChatMessage(const QString &message);
+    void sendChatReply(const QString &message, const QString &replyId,
+                       bool parentIsShadow = false);
+
     void updateRestrictionStatus();
 
     std::optional<bool> checkSpellingOverride() const;
@@ -171,6 +178,7 @@ private:
 
     bool moderationMode_{};
     ShadowViewMode shadowViewMode_{ShadowViewMode::Both};
+    ShadowSendTarget shadowSendTarget_{ShadowSendTarget::Shadow};
     bool isTopRightSplit_{};
 
     bool isMouseOver_{};

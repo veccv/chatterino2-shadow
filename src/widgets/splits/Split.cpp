@@ -571,7 +571,7 @@ void Split::addShortcuts()
 
              message = getApp()->getCommands()->execCommand(
                  message, this->getChannel(), false);
-             this->getChannel()->sendMessage(message);
+             this->sendChatMessage(message);
              return "";
          }},
         {"setChannelNotification",
@@ -848,6 +848,7 @@ void Split::setChannel(IndirectChannel newChannel)
     this->usermodeChangedConnection_.disconnect();
     this->roomModeChangedConnection_.disconnect();
     this->indirectChannelChangedConnection_.disconnect();
+    this->channelSignalHolder_.clear();
 
     TwitchChannel *tc = dynamic_cast<TwitchChannel *>(newChannel.get().get());
 
@@ -873,14 +874,10 @@ void Split::setChannel(IndirectChannel newChannel)
                                                   });
         if (auto *relay = getApp()->getShadowRelay())
         {
-            this->channelSignalHolder_.managedConnect(relay->disconnected,
-                                                      [this] {
-                                                          this->updateRestrictionStatus();
-                                                      });
-            this->channelSignalHolder_.managedConnect(relay->authenticated,
-                                                      [this] {
-                                                          this->updateRestrictionStatus();
-                                                      });
+            this->channelSignalHolder_.managedConnect(
+                relay->connectionStateChanged, [this] {
+                    this->updateRestrictionStatus();
+                });
         }
         this->updateRestrictionStatus();
 
@@ -964,33 +961,70 @@ ShadowViewMode Split::getShadowViewMode() const
     return this->shadowViewMode_;
 }
 
-void Split::updateRestrictionStatus()
+void Split::setShadowSendTarget(ShadowSendTarget target)
 {
-    auto *tc = dynamic_cast<TwitchChannel *>(this->channel_.get().get());
-    if (tc == nullptr)
+    if (this->shadowSendTarget_ == target)
     {
-        this->input_->setRestrictionStatus({});
         return;
     }
 
-    auto restriction = tc->restriction();
-    if (restriction != ChannelRestriction::Banned &&
-        restriction != ChannelRestriction::TimedOut)
+    this->shadowSendTarget_ = target;
+    this->header_->updateShadowSendButton();
+    this->updateRestrictionStatus();
+    getApp()->getWindows()->queueSave();
+}
+
+ShadowSendTarget Split::getShadowSendTarget() const
+{
+    return this->shadowSendTarget_;
+}
+
+void Split::sendChatMessage(const QString &message)
+{
+    auto c = this->getChannel();
+    if (c == nullptr)
     {
-        this->input_->setRestrictionStatus({});
+        return;
+    }
+
+    if (auto *tc = dynamic_cast<TwitchChannel *>(c.get()))
+    {
+        tc->sendMessage(message, this->shadowSendTarget_);
+        return;
+    }
+
+    c->sendMessage(message);
+}
+
+void Split::sendChatReply(const QString &message, const QString &replyId,
+                          bool parentIsShadow)
+{
+    auto *tc = dynamic_cast<TwitchChannel *>(this->getChannel().get());
+    if (tc == nullptr)
+    {
+        return;
+    }
+
+    tc->sendReply(message, replyId, this->shadowSendTarget_, parentIsShadow);
+}
+
+void Split::updateRestrictionStatus()
+{
+    if (this->shadowSendTarget_ != ShadowSendTarget::Shadow)
+    {
+        this->input_->setShadowConnectionStatus(std::nullopt);
         return;
     }
 
     auto *relay = getApp()->getShadowRelay();
-    if (relay == nullptr || !relay->isAuthenticated())
+    if (relay == nullptr)
     {
-        this->input_->setRestrictionStatus(
-            QStringLiteral("Shadow chat disconnected"));
+        this->input_->setShadowConnectionStatus(
+            ShadowConnectionState::Disconnected);
         return;
     }
 
-    this->input_->setRestrictionStatus(
-        QStringLiteral("Sends go to shadow chat"));
+    this->input_->setShadowConnectionStatus(relay->connectionState());
 }
 
 std::optional<bool> Split::checkSpellingOverride() const
@@ -1433,6 +1467,7 @@ SplitDescriptor Split::buildDescriptor() const
     descriptor.filters_ = this->getFilters();
     descriptor.spellCheckOverride = this->checkSpellingOverride();
     descriptor.shadowViewMode_ = this->getShadowViewMode();
+    descriptor.shadowSendTarget_ = this->getShadowSendTarget();
 
     auto chan = this->getIndirectChannel();
     descriptor.type_ = qmagicenum::enumNameString(chan.getType());

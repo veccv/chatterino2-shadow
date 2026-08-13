@@ -36,3 +36,29 @@ TEST(WindowDescriptors, MissingShadowViewModeLoadsAsBoth)
     auto loaded = SplitDescriptor::loadFromJSON(root);
     ASSERT_EQ(loaded.shadowViewMode_, ShadowViewMode::Both);
 }
+
+TEST(WindowDescriptors, ShadowSendTargetRoundTrip)
+{
+    for (auto target : {ShadowSendTarget::Normal, ShadowSendTarget::Shadow})
+    {
+        SplitDescriptor descriptor;
+        descriptor.type_ = QStringLiteral("Twitch");
+        descriptor.channelName_ = QStringLiteral("pajlada");
+        descriptor.shadowSendTarget_ = target;
+
+        auto loaded = SplitDescriptor::loadFromJSON(descriptor.toJson());
+        ASSERT_EQ(loaded.shadowSendTarget_, target);
+    }
+}
+
+TEST(WindowDescriptors, MissingShadowSendTargetLoadsAsShadow)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("type"), QStringLiteral("split"));
+    root.insert(QStringLiteral("data"),
+                QJsonObject{{QStringLiteral("type"), QStringLiteral("Twitch")},
+                            {QStringLiteral("name"), QStringLiteral("pajlada")}});
+
+    auto loaded = SplitDescriptor::loadFromJSON(root);
+    ASSERT_EQ(loaded.shadowSendTarget_, ShadowSendTarget::Shadow);
+}

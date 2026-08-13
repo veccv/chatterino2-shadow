@@ -116,6 +116,23 @@
                 },
                 {
                     "emote": {
+                        "images": {
+                            "1x": ""
+                        },
+                        "name": "",
+                        "tooltip": "normal chat user"
+                    },
+                    "flags": "AlwaysShow",
+                    "link": {
+                        "type": "None",
+                        "value": ""
+                    },
+                    "tooltip": "normal chat user",
+                    "trailingSpace": true,
+                    "type": "BadgeElement"
+                },
+                {
+                    "emote": {
                         "homePage": "https://help.twitch.tv/customer/en/portal/articles/659115-twitch-chat-badges-guide",
                         "images": {
                             "1x": "https://static-cdn.jtvnw.net/badges/v1/b817aba4-fad8-49e2-b88a-7cc744dfa6ec/1",

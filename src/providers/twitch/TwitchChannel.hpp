@@ -10,6 +10,7 @@
 #include "common/ChannelChatters.hpp"
 #include "common/Common.hpp"
 #include "common/UniqueAccess.hpp"
+#include "common/WindowDescriptors.hpp"
 #include "providers/ffz/FfzBadges.hpp"
 #include "providers/ffz/FfzEmotes.hpp"
 #include "providers/twitch/api/Helix.hpp"
@@ -189,12 +190,23 @@ public:
     bool isEmpty() const override;
     bool canSendMessage() const override;
     void sendMessage(const QString &message) override;
+    void sendMessage(const QString &message, ShadowSendTarget target);
     void sendReply(const QString &message, const QString &replyId);
-    /// If Banned or TimedOut, publish to shadow and skip Twitch.
+    void sendReply(const QString &message, const QString &replyId,
+                   bool parentIsShadow);
+    void sendReply(const QString &message, const QString &replyId,
+                   ShadowSendTarget target, bool parentIsShadow = false);
+    /// If Banned or TimedOut (or @a target is Shadow), publish to shadow and skip Twitch.
+    /// @a target Normal never intercepts. Nullopt keeps the restriction-based path.
     /// Returns true when the Twitch send path must not run.
-    bool tryInterceptShadowSend(const QString &parsedMessage, bool &sent);
+    bool tryInterceptShadowSend(
+        const QString &parsedMessage, bool &sent,
+        std::optional<ShadowSendTarget> target = std::nullopt,
+        const QString &replyId = {});
     void addShadowChatLine(const QString &login, const QString &text,
-                           const QColor &usernameColor = {});
+                           const QColor &usernameColor = {},
+                           const QString &id = {},
+                           const QString &replyParentId = {});
     bool isMod() const override;
     bool isVip() const;
     bool isStaff() const;
@@ -333,7 +345,8 @@ public:
     /// Arguments:
     /// - `messageText`: The text to be sent.
     /// - `wasSent`: A return channel for whether the message was sent or not.
-    pajlada::Signals::Signal<const QString &, bool &> sendMessageSignal;
+    /// - `allowShadowFallback`: When Helix returns Forbidden, try shadow send.
+    pajlada::Signals::Signal<const QString &, bool &, bool> sendMessageSignal;
 
     /// Fired when a reply to a message is supposed to be sent by the user in
     /// this channel.
@@ -344,7 +357,8 @@ public:
     /// - `messageText`: The text to be sent.
     /// - `replyToMessageID`: The ID of the replied-to message.
     /// - `wasSent`: A return channel for whether the message was sent or not.
-    pajlada::Signals::Signal<const QString &, const QString &, bool &>
+    /// - `allowShadowFallback`: When Helix returns Forbidden, try shadow send.
+    pajlada::Signals::Signal<const QString &, const QString &, bool &, bool>
         sendReplySignal;
 
     /**
@@ -451,6 +465,12 @@ public:
     pajlada::Signals::NoArgSignal pinnedMessageChanged;
 
 private:
+    void sendMessageWithTarget(const QString &message,
+                               std::optional<ShadowSendTarget> target);
+    void sendReplyWithTarget(const QString &message, const QString &replyId,
+                             std::optional<ShadowSendTarget> target,
+                             bool parentIsShadow = false);
+
     struct NameOptions {
         // displayName is the non-CJK-display name for this user
         // This will always be the same as their `name_`, but potentially with different casing

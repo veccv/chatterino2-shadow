@@ -150,7 +150,8 @@ void ShadowRelay::unsubscribeChannel(const QString &roomId)
 }
 
 bool ShadowRelay::publish(const QString &roomId, const QString &text,
-                          const QString &id, const QString &color)
+                          const QString &id, const QString &color,
+                          const QString &replyParentId)
 {
     assertInGuiThread();
     if (!this->isAuthenticated() || roomId.isEmpty() || text.isEmpty() ||
@@ -160,13 +161,27 @@ bool ShadowRelay::publish(const QString &roomId, const QString &text,
     }
 
     this->pendingIds_.insert(id);
-    this->socket_.sendText(encodeShadowPublish(roomId, id, text, color));
+    this->socket_.sendText(
+        encodeShadowPublish(roomId, id, text, color, replyParentId));
     return true;
 }
 
 bool ShadowRelay::isAuthenticated() const
 {
     return this->open_ && !this->validatedLogin_.isEmpty();
+}
+
+ShadowConnectionState ShadowRelay::connectionState() const
+{
+    if (this->isAuthenticated())
+    {
+        return ShadowConnectionState::Connected;
+    }
+    if (this->authenticating_ || this->open_)
+    {
+        return ShadowConnectionState::Connecting;
+    }
+    return ShadowConnectionState::Disconnected;
 }
 
 QString ShadowRelay::validatedLogin() const
@@ -209,6 +224,7 @@ void ShadowRelay::resetSocket()
     {
         this->disconnected.invoke();
     }
+    this->connectionStateChanged.invoke();
 }
 
 void ShadowRelay::connect()
@@ -249,6 +265,7 @@ void ShadowRelay::connect()
     qCDebug(chatterinoShadow) << "Connecting shadow relay";
     this->socket_ = this->pool_->createSocket(
         std::move(options), std::make_unique<Listener>(this, generation));
+    this->connectionStateChanged.invoke();
 }
 
 void ShadowRelay::handleOpen(int generation)
@@ -282,6 +299,7 @@ void ShadowRelay::handleText(int generation, const QByteArray &data)
             qCDebug(chatterinoShadow)
                 << "Shadow relay authenticated as" << this->validatedLogin_;
             this->authenticated.invoke();
+            this->connectionStateChanged.invoke();
             for (const auto &room : this->rooms_)
             {
                 this->sendJoin(room);
@@ -321,6 +339,7 @@ void ShadowRelay::handleClose(int generation)
     this->validatedLogin_.clear();
     this->pendingIds_.clear();
     this->disconnected.invoke();
+    this->connectionStateChanged.invoke();
     if (wasOpen)
     {
         qCDebug(chatterinoShadow) << "Shadow relay disconnected";

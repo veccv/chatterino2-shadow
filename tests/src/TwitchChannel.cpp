@@ -11,6 +11,7 @@
 #include "messages/MessageBuilder.hpp"
 #include "messages/MessageElement.hpp"
 #include "messages/MessageFlag.hpp"
+#include "messages/MessageThread.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/EmoteController.hpp"
 #include "mocks/Logging.hpp"
@@ -245,7 +246,7 @@ TEST_F(TwitchChannelRestriction, BannedSendDoesNotInvokeTwitch)
 
     bool helixCalled = false;
     std::ignore = this->channel->sendMessageSignal.connect(
-        [&](const QString & /*msg*/, bool & /*sent*/) {
+        [&](const QString & /*msg*/, bool & /*sent*/, bool /*fallback*/) {
             helixCalled = true;
         });
 
@@ -265,7 +266,7 @@ TEST_F(TwitchChannelRestriction, TimedOutSendGoesToShadowThenTwitch)
 
     bool helixCalled = false;
     std::ignore = this->channel->sendMessageSignal.connect(
-        [&](const QString & /*msg*/, bool &sent) {
+        [&](const QString & /*msg*/, bool &sent, bool /*fallback*/) {
             helixCalled = true;
             sent = true;
         });
@@ -277,7 +278,7 @@ TEST_F(TwitchChannelRestriction, TimedOutSendGoesToShadowThenTwitch)
     this->channel->setRestriction(ChannelRestriction::None);
     sent = false;
     ASSERT_FALSE(this->channel->tryInterceptShadowSend("back", sent));
-    this->channel->sendMessageSignal.invoke("back", sent);
+    this->channel->sendMessageSignal.invoke("back", sent, true);
     ASSERT_TRUE(helixCalled);
     ASSERT_TRUE(sent);
 }
@@ -286,7 +287,7 @@ TEST_F(TwitchChannelRestriction, NoneDoesNotPublishToShadow)
 {
     bool helixCalled = false;
     std::ignore = this->channel->sendMessageSignal.connect(
-        [&](const QString & /*msg*/, bool &sent) {
+        [&](const QString & /*msg*/, bool &sent, bool /*fallback*/) {
             helixCalled = true;
             sent = true;
         });
@@ -294,8 +295,44 @@ TEST_F(TwitchChannelRestriction, NoneDoesNotPublishToShadow)
     bool sent = false;
     ASSERT_FALSE(this->channel->tryInterceptShadowSend("hello", sent));
     ASSERT_FALSE(sent);
-    this->channel->sendMessageSignal.invoke("hello", sent);
+    this->channel->sendMessageSignal.invoke("hello", sent, true);
     ASSERT_TRUE(helixCalled);
+}
+
+TEST_F(TwitchChannelRestriction, NormalTargetSkipsShadowWhenBanned)
+{
+    this->channel->setRestriction(ChannelRestriction::Banned);
+
+    bool helixCalled = false;
+    std::ignore = this->channel->sendMessageSignal.connect(
+        [&](const QString & /*msg*/, bool & /*sent*/, bool /*fallback*/) {
+            helixCalled = true;
+        });
+
+    bool sent = false;
+    ASSERT_FALSE(this->channel->tryInterceptShadowSend(
+        "still here", sent, ShadowSendTarget::Normal));
+    ASSERT_FALSE(sent);
+    ASSERT_FALSE(helixCalled);
+}
+
+TEST_F(TwitchChannelRestriction, ShadowTargetInterceptsWhenUnrestricted)
+{
+    bool helixCalled = false;
+    std::ignore = this->channel->sendMessageSignal.connect(
+        [&](const QString & /*msg*/, bool & /*sent*/, bool /*fallback*/) {
+            helixCalled = true;
+        });
+
+    bool sent = false;
+    ASSERT_TRUE(this->channel->tryInterceptShadowSend(
+        "hello", sent, ShadowSendTarget::Shadow));
+    ASSERT_FALSE(sent);
+    ASSERT_FALSE(helixCalled);
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_FALSE(messages.empty());
+    ASSERT_TRUE(messages.back()->flags.has(MessageFlag::System));
 }
 
 TEST_F(TwitchChannelRestriction, IncomingShadowLineIsMarked)
@@ -439,4 +476,112 @@ TEST_F(TwitchChannelRestriction, GhostWatchLineIsNotShadow)
     this->channel->addMessage(msg, MessageContext::Original);
 
     ASSERT_FALSE(msg->flags.has(MessageFlag::ShadowMessage));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowLineGetsReplyableId)
+{
+    this->channel->addShadowChatLine("pajlada", "still here", {},
+                                     QStringLiteral("shadow-1"));
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0]->id, QStringLiteral("shadow-1"));
+    EXPECT_EQ(messages[0]->isReplyable(), Message::ReplyStatus::Replyable);
+}
+
+TEST_F(TwitchChannelRestriction, ShadowReplyJoinsTwitchThread)
+{
+    auto root = std::make_shared<Message>();
+    root->id = QStringLiteral("twitch-1");
+    root->loginName = QStringLiteral("forsen");
+    root->displayName = QStringLiteral("forsen");
+    root->messageText = QStringLiteral("hello twitch");
+    this->channel->addMessage(root, MessageContext::Original);
+
+    this->channel->addShadowChatLine("pajlada", "from shadow", {},
+                                     QStringLiteral("shadow-1"),
+                                     QStringLiteral("twitch-1"));
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 2);
+    ASSERT_TRUE(messages[1]->flags.has(MessageFlag::ReplyMessage));
+    ASSERT_NE(messages[1]->replyThread, nullptr);
+    EXPECT_EQ(messages[1]->replyThread->rootId(), QStringLiteral("twitch-1"));
+    ASSERT_NE(messages[1]->replyParent, nullptr);
+    EXPECT_EQ(messages[1]->replyParent->id, QStringLiteral("twitch-1"));
+}
+
+TEST_F(TwitchChannelRestriction, ShadowReplyBadgeSitsWithUsername)
+{
+    auto root = std::make_shared<Message>();
+    root->id = QStringLiteral("twitch-1");
+    root->loginName = QStringLiteral("forsen");
+    root->displayName = QStringLiteral("forsen");
+    root->messageText = QStringLiteral("hello twitch");
+    this->channel->addMessage(root, MessageContext::Original);
+
+    this->channel->addShadowChatLine("pajlada", "from shadow", {},
+                                     QStringLiteral("shadow-1"),
+                                     QStringLiteral("twitch-1"));
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 2);
+
+    const auto &elements = messages[1]->elements;
+    auto indexOf = [&](auto pred) -> int {
+        for (int i = 0; i < static_cast<int>(elements.size()); ++i)
+        {
+            if (pred(elements[static_cast<size_t>(i)].get()))
+            {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    const int reply = indexOf([](const MessageElement *e) {
+        return dynamic_cast<const ReplyCurveElement *>(e) != nullptr;
+    });
+    const int timestamp = indexOf([](const MessageElement *e) {
+        return dynamic_cast<const TimestampElement *>(e) != nullptr;
+    });
+    const int badge = indexOf([](const MessageElement *e) {
+        return dynamic_cast<const BadgeElement *>(e) != nullptr &&
+               e->getTooltip() == QStringLiteral("Shadow user");
+    });
+    const int nick = indexOf([](const MessageElement *e) {
+        auto *text = dynamic_cast<const TextElement *>(e);
+        return text != nullptr &&
+               text->getFlags().has(MessageElementFlag::Username);
+    });
+
+    ASSERT_GE(reply, 0);
+    ASSERT_GE(timestamp, 0);
+    ASSERT_GE(badge, 0);
+    ASSERT_GE(nick, 0);
+    EXPECT_LT(reply, timestamp);
+    EXPECT_LT(timestamp, badge);
+    EXPECT_EQ(badge + 1, nick);
+}
+
+TEST_F(TwitchChannelRestriction, ShadowUsersCanThreadAmongThemselves)
+{
+    this->channel->addShadowChatLine("pajlada", "root", {},
+                                     QStringLiteral("shadow-root"));
+    this->channel->addShadowChatLine("other", "reply", {},
+                                     QStringLiteral("shadow-reply"),
+                                     QStringLiteral("shadow-root"));
+    this->channel->addShadowChatLine("pajlada", "again", {},
+                                     QStringLiteral("shadow-reply-2"),
+                                     QStringLiteral("shadow-reply"));
+
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 3);
+    ASSERT_NE(messages[1]->replyThread, nullptr);
+    EXPECT_EQ(messages[1]->replyThread->rootId(),
+              QStringLiteral("shadow-root"));
+    ASSERT_NE(messages[2]->replyThread, nullptr);
+    EXPECT_EQ(messages[2]->replyThread.get(), messages[1]->replyThread.get());
+    ASSERT_NE(messages[2]->replyParent, nullptr);
+    EXPECT_EQ(messages[2]->replyParent->id, QStringLiteral("shadow-reply"));
 }

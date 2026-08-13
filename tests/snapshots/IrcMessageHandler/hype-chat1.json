@@ -61,6 +61,23 @@
                 {
                     "emote": {
                         "images": {
+                            "1x": ""
+                        },
+                        "name": "",
+                        "tooltip": "normal chat user"
+                    },
+                    "flags": "AlwaysShow",
+                    "link": {
+                        "type": "None",
+                        "value": ""
+                    },
+                    "tooltip": "normal chat user",
+                    "trailingSpace": true,
+                    "type": "BadgeElement"
+                },
+                {
+                    "emote": {
+                        "images": {
                             "1x": "https://static-cdn.jtvnw.net/badges/v1/e33d8b46-f63b-4e67-996d-4a7dcec0ad33/1",
                             "2x": "https://static-cdn.jtvnw.net/badges/v1/e33d8b46-f63b-4e67-996d-4a7dcec0ad33/2",
                             "3x": "https://static-cdn.jtvnw.net/badges/v1/e33d8b46-f63b-4e67-996d-4a7dcec0ad33/3"

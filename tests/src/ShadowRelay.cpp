@@ -100,6 +100,30 @@ TEST(ShadowProtocol, EncodePublishIncludesColor)
     EXPECT_EQ(json.value(u"color"_s).toString(), u"#FF69B4"_s);
 }
 
+TEST(ShadowProtocol, EncodePublishIncludesReply)
+{
+    auto publish = encodeShadowPublish(u"1"_s, u"id-2"_s, u"reply"_s,
+                                       u"#FF69B4"_s, u"parent-1"_s);
+    auto json = QJsonDocument::fromJson(publish).object();
+    EXPECT_EQ(json.value(u"reply"_s).toString(), u"parent-1"_s);
+}
+
+TEST(ShadowProtocol, EncodePublishOmitsEmptyReply)
+{
+    auto publish = encodeShadowPublish(u"1"_s, u"id-1"_s, u"hello"_s);
+    auto json = QJsonDocument::fromJson(publish).object();
+    EXPECT_FALSE(json.contains(u"reply"_s));
+}
+
+TEST(ShadowProtocol, ParseMessageReply)
+{
+    auto message = parseShadowWire(
+        R"({"op":"message","room":"1","login":"pajlada","id":"abc","text":"Kappa","reply":"parent-1"})");
+    ASSERT_TRUE(message.has_value());
+    EXPECT_EQ(message->replyParentId, u"parent-1"_s);
+    EXPECT_EQ(message->text, u"Kappa"_s);
+}
+
 TEST(ShadowProtocol, ParseMessageColor)
 {
     auto message = parseShadowWire(

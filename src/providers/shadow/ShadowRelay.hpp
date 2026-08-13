@@ -14,10 +14,17 @@
 #include <QString>
 #include <QTimer>
 
+#include <cstdint>
 #include <optional>
 #include <unordered_set>
 
 namespace chatterino {
+
+enum class ShadowConnectionState : std::uint8_t {
+    Disconnected,
+    Connecting,
+    Connected,
+};
 
 class ShadowRelay : public QObject
 {
@@ -37,16 +44,18 @@ public:
 
     /// Publish text to a room. Returns false if the socket is not authenticated.
     bool publish(const QString &roomId, const QString &text, const QString &id,
-                 const QString &color = {});
+                 const QString &color = {}, const QString &replyParentId = {});
 
     pajlada::Signals::Signal<ShadowWireEvent> messageReceived;
     pajlada::Signals::Signal<QString> publishAck;
     pajlada::Signals::NoArgSignal authenticated;
     pajlada::Signals::NoArgSignal disconnected;
+    pajlada::Signals::NoArgSignal connectionStateChanged;
 
     void stop();
 
     bool isAuthenticated() const;
+    ShadowConnectionState connectionState() const;
     QString validatedLogin() const;
 
 private:

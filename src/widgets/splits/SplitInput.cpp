@@ -12,6 +12,7 @@
 #include "controllers/spellcheck/SpellChecker.hpp"
 #include "messages/Link.hpp"
 #include "messages/Message.hpp"
+#include "providers/shadow/ShadowRelay.hpp"
 #include "providers/twitch/TwitchChannel.hpp"
 #include "providers/twitch/TwitchCommon.hpp"
 #include "providers/twitch/TwitchIrcServer.hpp"
@@ -35,6 +36,7 @@
 #include "widgets/splits/Split.hpp"
 #include "widgets/splits/SplitContainer.hpp"
 
+#include <QColor>
 #include <QCompleter>
 #include <QPainter>
 #include <QSignalBlocker>
@@ -302,7 +304,11 @@ void SplitInput::initLayout()
         hbox->addWidget(this->ui_.sendWaitStatus);
 
         this->ui_.restrictionStatus = new QLabel();
-        this->ui_.restrictionStatus->setAlignment(Qt::AlignRight);
+        this->ui_.restrictionStatus->setAlignment(Qt::AlignRight |
+                                                  Qt::AlignVCenter);
+        this->ui_.restrictionStatus->setTextFormat(Qt::RichText);
+        this->ui_.restrictionStatus->setTextInteractionFlags(
+            Qt::NoTextInteraction);
         this->ui_.restrictionStatus->setHidden(true);
         hbox->addWidget(this->ui_.restrictionStatus);
 
@@ -404,6 +410,10 @@ void SplitInput::themeChangedEvent()
         this->ui_.textEditLength->setPalette(palette);
         this->ui_.sendWaitStatus->setPalette(palette);
         this->ui_.restrictionStatus->setPalette(palette);
+    }
+    if (this->shadowConnectionState_.has_value())
+    {
+        this->setShadowConnectionStatus(this->shadowConnectionState_);
     }
 
     {
@@ -512,7 +522,7 @@ QString SplitInput::handleSendMessage(const std::vector<QString> &arguments)
         QString sendMessage =
             getApp()->getCommands()->execCommand(message, c, false);
 
-        c->sendMessage(sendMessage);
+        this->split_->sendChatMessage(sendMessage);
 
         this->postMessageSend(message, arguments);
         return "";
@@ -545,7 +555,9 @@ QString SplitInput::handleSendMessage(const std::vector<QString> &arguments)
         getApp()->getCommands()->execCommand(message, c, false);
 
     // Reply within TwitchChannel
-    tc->sendReply(sendMessage, this->replyTarget_->id);
+    this->split_->sendChatReply(
+        sendMessage, this->replyTarget_->id,
+        this->replyTarget_->flags.has(MessageFlag::ShadowMessage));
 
     this->postMessageSend(message, arguments);
     return "";
@@ -1612,7 +1624,8 @@ void SplitInput::updateFonts()
         app->getFonts()->getFont(FontStyle::TimestampMedium, this->scale());
     this->ui_.textEditLength->setFont(tsMedium);
     this->ui_.sendWaitStatus->setFont(tsMedium);
-    this->ui_.restrictionStatus->setFont(tsMedium);
+    this->ui_.restrictionStatus->setFont(
+        app->getFonts()->getFont(FontStyle::ChatMediumSmall, this->scale()));
     this->ui_.replyLabel->setFont(
         app->getFonts()->getFont(FontStyle::ChatMediumBold, this->scale()));
 
@@ -1812,15 +1825,58 @@ void SplitInput::setSendWaitStatus(const QString &text) const
     }
 }
 
-void SplitInput::setRestrictionStatus(const QString &text) const
+void SplitInput::setShadowConnectionStatus(
+    std::optional<ShadowConnectionState> state)
 {
-    this->ui_.restrictionStatus->setText(text);
-    this->ui_.restrictionStatus->setHidden(text.isEmpty());
+    this->shadowConnectionState_ = state;
+    if (!state.has_value())
+    {
+        this->ui_.restrictionStatus->clear();
+        this->ui_.restrictionStatus->setToolTip({});
+        this->ui_.restrictionStatus->setHidden(true);
+        return;
+    }
+
+    QColor color;
+    QString tooltip;
+    switch (*state)
+    {
+        case ShadowConnectionState::Connected:
+            color = QColor(46, 204, 113);
+            tooltip = QStringLiteral("ShadowChat connected");
+            break;
+        case ShadowConnectionState::Connecting:
+            color = QColor(241, 196, 15);
+            tooltip = QStringLiteral("ShadowChat connecting");
+            break;
+        case ShadowConnectionState::Disconnected:
+            color = QColor(231, 76, 60);
+            tooltip = QStringLiteral("ShadowChat disconnected");
+            break;
+    }
+
+    this->ui_.restrictionStatus->setText(
+        QStringLiteral("<span style=\"color:%1\">●</span> "
+                       "<span style=\"color:%2\">ShadowChat</span>")
+            .arg(color.name(QColor::HexRgb),
+                 this->theme->splits.input.text.name(QColor::HexRgb)));
+    this->ui_.restrictionStatus->setToolTip(tooltip);
+    this->ui_.restrictionStatus->setHidden(false);
 }
 
 QString SplitInput::restrictionStatus() const
 {
-    return this->ui_.restrictionStatus->text();
+    if (!this->shadowConnectionState_.has_value())
+    {
+        return {};
+    }
+
+    return QStringLiteral("ShadowChat");
+}
+
+std::optional<ShadowConnectionState> SplitInput::shadowConnectionStatus() const
+{
+    return this->shadowConnectionState_;
 }
 
 }  // namespace chatterino

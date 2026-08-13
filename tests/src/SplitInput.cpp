@@ -11,6 +11,7 @@
 #include "controllers/hotkeys/HotkeyController.hpp"
 #include "mocks/BaseApplication.hpp"
 #include "mocks/EmoteController.hpp"
+#include "providers/shadow/ShadowRelay.hpp"
 #include "singletons/Fonts.hpp"
 #include "singletons/Paths.hpp"
 #include "singletons/Settings.hpp"
@@ -170,15 +171,49 @@ TEST(SplitInputRestriction, StatusDistinctFromSendWait)
     SplitInput input(split);
 
     ASSERT_TRUE(input.restrictionStatus().isEmpty());
-    input.setRestrictionStatus(QStringLiteral("Sends go to shadow chat"));
-    ASSERT_EQ(input.restrictionStatus(),
-              QStringLiteral("Sends go to shadow chat"));
+    input.setShadowConnectionStatus(ShadowConnectionState::Connected);
+    ASSERT_EQ(input.restrictionStatus(), QStringLiteral("ShadowChat"));
+    ASSERT_EQ(input.shadowConnectionStatus(),
+              ShadowConnectionState::Connected);
     input.setSendWaitStatus(QStringLiteral("10s"));
-    ASSERT_EQ(input.restrictionStatus(),
-              QStringLiteral("Sends go to shadow chat"));
-    input.setRestrictionStatus(QStringLiteral("Shadow chat disconnected"));
-    ASSERT_EQ(input.restrictionStatus(),
-              QStringLiteral("Shadow chat disconnected"));
-    input.setRestrictionStatus({});
+    ASSERT_EQ(input.restrictionStatus(), QStringLiteral("ShadowChat"));
+    input.setShadowConnectionStatus(ShadowConnectionState::Disconnected);
+    ASSERT_EQ(input.restrictionStatus(), QStringLiteral("ShadowChat"));
+    ASSERT_EQ(input.shadowConnectionStatus(),
+              ShadowConnectionState::Disconnected);
+    input.setShadowConnectionStatus(std::nullopt);
     ASSERT_TRUE(input.restrictionStatus().isEmpty());
+    ASSERT_FALSE(input.shadowConnectionStatus().has_value());
+}
+
+TEST(SplitInputRestriction, StatusFollowsSendTarget)
+{
+    MockApplication app;
+    auto *split = new Split(nullptr);
+
+    ASSERT_EQ(split->getShadowSendTarget(), ShadowSendTarget::Shadow);
+    split->updateRestrictionStatus();
+    ASSERT_EQ(split->getInput().restrictionStatus(),
+              QStringLiteral("ShadowChat"));
+    ASSERT_EQ(split->getInput().shadowConnectionStatus(),
+              ShadowConnectionState::Disconnected);
+
+    split->setShadowSendTarget(ShadowSendTarget::Normal);
+    ASSERT_TRUE(split->getInput().restrictionStatus().isEmpty());
+
+    split->setShadowSendTarget(ShadowSendTarget::Shadow);
+    ASSERT_EQ(split->getInput().restrictionStatus(),
+              QStringLiteral("ShadowChat"));
+}
+
+TEST(SplitInputRestriction, ConnectionDotStates)
+{
+    MockApplication app;
+    auto *split = new Split(nullptr);
+    SplitInput input(split);
+
+    input.setShadowConnectionStatus(ShadowConnectionState::Connecting);
+    ASSERT_EQ(input.restrictionStatus(), QStringLiteral("ShadowChat"));
+    ASSERT_EQ(input.shadowConnectionStatus(),
+              ShadowConnectionState::Connecting);
 }

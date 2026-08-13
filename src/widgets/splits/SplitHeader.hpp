@@ -13,6 +13,7 @@
 #include <QElapsedTimer>
 #include <QMenu>
 #include <QPoint>
+#include <QWidget>
 
 #include <memory>
 #include <vector>
@@ -41,6 +42,7 @@ public:
     // has changed (e.g. sub mode toggled)
     void updateRoomModes();
     void updateShadowViewButton();
+    void updateShadowSendButton();
 
 protected:
     void scaleChangedEvent(float scale) override;
@@ -66,6 +68,7 @@ private:
     void resetThumbnail();
 
     void handleChannelChanged();
+    void updateShadowSwitcherChrome();
 
     Split *const split_{};
     QString tooltipText_{};
@@ -81,7 +84,9 @@ private:
     Label *titleLabel_{};
 
     LabelButton *modeButton_{};
+    QWidget *shadowSwitcherHost_{};
     LabelButton *shadowViewButton_{};
+    LabelButton *shadowSendButton_{};
     QAction *modeActionSetEmote{};
     QAction *modeActionSetSub{};
     QAction *modeActionSetSlow{};

@@ -86,6 +86,10 @@ SplitDescriptor SplitDescriptor::loadFromJSON(const QJsonObject &root)
         qmagicenum::enumCast<ShadowViewMode>(
             root.value("shadowViewMode").toString())
             .value_or(ShadowViewMode::Both);
+    descriptor.shadowSendTarget_ =
+        qmagicenum::enumCast<ShadowSendTarget>(
+            root.value("shadowSendTarget").toString())
+            .value_or(ShadowSendTarget::Shadow);
 
     auto spellOverride = root["checkSpelling"];
     if (spellOverride.isBool())
@@ -104,6 +108,8 @@ QJsonObject SplitDescriptor::toJson() const
     obj.insert("moderationMode", this->moderationMode_);
     obj.insert("shadowViewMode",
                qmagicenum::enumNameString(this->shadowViewMode_));
+    obj.insert("shadowSendTarget",
+               qmagicenum::enumNameString(this->shadowSendTarget_));
 
     QJsonObject data{{"type"_L1, this->type_}};
     if (!this->channelName_.isEmpty())
