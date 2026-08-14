@@ -2,6 +2,15 @@
 
 ## Unversioned
 
+## 1.0.1
+
+- Major: In the channel you are watching, every subscriber emote at T1, T2, and T3 is available in the picker, completion, and local parse. Follower emotes stay follow-gated. (#2)
+- Minor: Documented fork-only options versus stock Chatterino in the README, including talking without phone verification. (#2)
+
+## 1.0.0
+
+- Major: First Chatterino Shadow release: stay in banned channels, talk during timeouts via ShadowChat, and keep your Twitch name on the overlay. (#1)
+
 ## 2.5.5
 
 - Minor: Update emoji data to Unicode 17.0. (#6471)

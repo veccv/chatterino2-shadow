@@ -34,6 +34,12 @@
         <binary>chatterino</binary>
     </provides>
     <releases>
+        <release version="1.0.1" date="2026-08-14">
+            <url>https://github.com/veccv/chatterino2-shadow/releases/tag/v1.0.1</url>
+        </release>
+        <release version="1.0.0" date="2026-08-14">
+            <url>https://github.com/veccv/chatterino2-shadow/releases/tag/v1.0.0</url>
+        </release>
         <release version="2.5.5" date="2026-03-22">
             <url>https://github.com/Chatterino/chatterino2/releases/tag/v2.5.5</url>
         </release>
