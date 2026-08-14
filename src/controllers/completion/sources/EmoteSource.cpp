@@ -22,10 +22,14 @@ namespace chatterino::completion {
 namespace {
 
 void addEmotes(std::vector<EmoteItem> &out, const EmoteMap &map,
-               const QString &providerName)
+               const QString &providerName, const EmoteMap *skip = nullptr)
 {
     for (auto &&emote : map)
     {
+        if (skip && skip->contains(emote.first))
+        {
+            continue;
+        }
         out.push_back({.emote = emote.second,
                        .searchName = emote.first.string,
                        .tabCompletionName = emote.first.string,
@@ -101,13 +105,15 @@ void EmoteSource::initializeFromChannel(const Channel *channel)
     {
         if (tc)
         {
-            if (auto twitch = tc->localTwitchEmotes())
+            auto locals = tc->localTwitchEmotes();
+            if (locals)
             {
-                addEmotes(emotes, *twitch, "Local Twitch Emotes");
+                addEmotes(emotes, *locals, "Local Twitch Emotes");
             }
 
             auto user = getApp()->getAccounts()->twitch.getCurrent();
-            addEmotes(emotes, **user->accessEmotes(), "Twitch Emote");
+            addEmotes(emotes, **user->accessEmotes(), "Twitch Emote",
+                      locals.get());
 
             // TODO extract "Channel {BetterTTV,7TV,FrankerFaceZ}" text into a #define.
             if (auto bttv = tc->bttvEmotes())

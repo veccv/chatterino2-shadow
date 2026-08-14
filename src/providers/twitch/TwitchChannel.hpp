@@ -268,6 +268,8 @@ public:
     std::optional<EmotePtr> seventvEmote(const EmoteName &name) const;
 
     std::shared_ptr<const EmoteMap> localTwitchEmotes() const;
+    std::shared_ptr<const std::vector<TwitchEmoteSet>> localTwitchEmoteSets()
+        const;
     std::shared_ptr<const EmoteMap> bttvEmotes() const;
     std::shared_ptr<const EmoteMap> ffzEmotes() const;
     std::shared_ptr<const EmoteMap> seventvEmotes() const;
@@ -280,6 +282,8 @@ public:
     void setBttvEmotes(std::shared_ptr<const EmoteMap> &&map);
     void setFfzEmotes(std::shared_ptr<const EmoteMap> &&map);
     void setSeventvEmotes(std::shared_ptr<const EmoteMap> &&map);
+    void setLocalTwitchCatalog(
+        std::shared_ptr<const LocalTwitchEmoteCatalog> catalog);
 
     const QString &seventvUserID() const;
     const QString &seventvEmoteSetID() const;
@@ -389,6 +393,8 @@ public:
     pajlada::Signals::Signal<const QString &> sendWaitUpdate;
 
     pajlada::Signals::NoArgSignal restrictionChanged;
+
+    pajlada::Signals::NoArgSignal localTwitchEmotesChanged;
 
     pajlada::Signals::Signal<const std::vector<HelixMinimalUser> &>
         sharedChatStatusChanged;
@@ -617,8 +623,8 @@ private:
 protected:
     void messageRemovedFromStart(const MessagePtr &msg) override;
 
-    Atomic<std::shared_ptr<const EmoteMap>> localTwitchEmotes_;
-    Atomic<QString> localTwitchEmoteSetID_;
+    Atomic<std::shared_ptr<const LocalTwitchEmoteCatalog>> localTwitchCatalog_;
+    std::atomic<uint64_t> localTwitchEmoteRefreshGeneration_{0};
     Atomic<std::shared_ptr<const EmoteMap>> bttvEmotes_;
     Atomic<std::shared_ptr<const EmoteMap>> ffzEmotes_;
     Atomic<std::shared_ptr<const EmoteMap>> seventvEmotes_;

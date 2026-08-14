@@ -310,6 +310,7 @@ struct HelixChannelEmote {
     const QString type;
     const QString setID;
     const QString ownerID;
+    const QString tier;
 
     explicit HelixChannelEmote(const QJsonObject &jsonObject)
         : id(jsonObject["id"].toString())
@@ -317,7 +318,18 @@ struct HelixChannelEmote {
         , type(jsonObject["emote_type"].toString())
         , setID(jsonObject["emote_set_id"].toString())
         , ownerID(jsonObject["owner_id"].toString())
+        , tier(jsonObject["tier"].toString())
     {
+    }
+
+    TwitchChannelEmoteInfo toChannelInfo() const
+    {
+        return {
+            .id = this->id,
+            .name = this->name,
+            .type = this->type,
+            .tier = this->tier,
+        };
     }
 };
 
