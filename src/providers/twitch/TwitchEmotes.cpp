@@ -14,6 +14,9 @@
 
 #include <QStringBuilder>
 
+#include <array>
+#include <optional>
+
 namespace {
 
 using namespace chatterino;
@@ -421,7 +424,147 @@ QString TwitchEmoteSet::title() const
         return this->owner->name + " (Bits)";
     }
 
-    return this->owner->name;
+    QStringView suffix;
+    switch (this->kind)
+    {
+        case TwitchEmoteSetKind::Follower:
+            suffix = u" (Follower)";
+            break;
+        case TwitchEmoteSetKind::Tier1:
+            suffix = u" (Tier 1)";
+            break;
+        case TwitchEmoteSetKind::Tier2:
+            suffix = u" (Tier 2)";
+            break;
+        case TwitchEmoteSetKind::Tier3:
+            suffix = u" (Tier 3)";
+            break;
+        case TwitchEmoteSetKind::Unspecified:
+            break;
+    }
+
+    if (suffix.isEmpty())
+    {
+        return this->owner->name;
+    }
+    return this->owner->name % suffix;
+}
+
+bool skipCurrentChannelAccountSubSet(bool localCatalogHasSets,
+                                     const QString &currentChannelID,
+                                     const TwitchEmoteSet &set)
+{
+    return localCatalogHasSets && set.isSubLike && !set.isBits && set.owner &&
+           set.owner->id == currentChannelID;
+}
+
+namespace {
+
+std::optional<TwitchEmoteSetKind> localKindFromHelix(
+    const TwitchChannelEmoteInfo &emote, bool includeFollower)
+{
+    if (emote.type == u"subscriptions")
+    {
+        if (emote.tier == u"2000")
+        {
+            return TwitchEmoteSetKind::Tier2;
+        }
+        if (emote.tier == u"3000")
+        {
+            return TwitchEmoteSetKind::Tier3;
+        }
+        return TwitchEmoteSetKind::Tier1;
+    }
+    if (emote.type == u"follower")
+    {
+        if (!includeFollower)
+        {
+            return std::nullopt;
+        }
+        return TwitchEmoteSetKind::Follower;
+    }
+    return std::nullopt;
+}
+
+constexpr int localKindSlot(TwitchEmoteSetKind kind)
+{
+    switch (kind)
+    {
+        case TwitchEmoteSetKind::Tier1:
+            return 0;
+        case TwitchEmoteSetKind::Tier2:
+            return 1;
+        case TwitchEmoteSetKind::Tier3:
+            return 2;
+        case TwitchEmoteSetKind::Follower:
+            return 3;
+        case TwitchEmoteSetKind::Unspecified:
+            return -1;
+    }
+    return -1;
+}
+
+}  // namespace
+
+LocalTwitchEmoteCatalog buildLocalTwitchEmoteCatalog(
+    const std::vector<TwitchChannelEmoteInfo> &emotes, bool includeFollower,
+    std::shared_ptr<TwitchUser> owner, ITwitchEmotes &twitchEmotes)
+{
+    LocalTwitchEmoteCatalog catalog;
+    if (!owner)
+    {
+        return catalog;
+    }
+
+    std::array<TwitchEmoteSet, 4> slots;
+    std::array<bool, 4> used{};
+
+    for (const auto &emote : emotes)
+    {
+        auto kind = localKindFromHelix(emote, includeFollower);
+        if (!kind)
+        {
+            continue;
+        }
+        auto slot = localKindSlot(*kind);
+        if (slot < 0)
+        {
+            continue;
+        }
+
+        EmoteId id{emote.id};
+        EmoteName name{emote.name};
+        auto emotePtr = twitchEmotes.getOrCreateEmote(id, name);
+        if (!catalog.emotes.try_emplace(emotePtr->name, emotePtr).second)
+        {
+            continue;
+        }
+
+        if (!used[static_cast<size_t>(slot)])
+        {
+            slots[static_cast<size_t>(slot)] = TwitchEmoteSet{
+                .owner = owner,
+                .emotes = {},
+                .isBits = false,
+                .isSubLike = true,
+                .kind = *kind,
+            };
+            used[static_cast<size_t>(slot)] = true;
+        }
+        slots[static_cast<size_t>(slot)].emotes.emplace(emotePtr->name,
+                                                        emotePtr);
+    }
+
+    catalog.sets.reserve(4);
+    for (size_t i = 0; i < slots.size(); ++i)
+    {
+        if (used[i])
+        {
+            catalog.sets.push_back(std::move(slots[i]));
+        }
+    }
+
+    return catalog;
 }
 
 QString TwitchEmotes::cleanUpEmoteCode(const QString &dirtyEmoteCode)

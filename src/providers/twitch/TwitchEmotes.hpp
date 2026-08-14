@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace chatterino {
 
@@ -43,6 +44,14 @@ struct CheerEmoteSet {
     std::vector<CheerEmote> cheerEmotes;
 };
 
+enum class TwitchEmoteSetKind {
+    Unspecified,
+    Tier1,
+    Tier2,
+    Tier3,
+    Follower,
+};
+
 struct TwitchEmoteSet {
     /// @brief The owner of this set
     ///
@@ -59,12 +68,39 @@ struct TwitchEmoteSet {
     /// This includes sub and bit emotes
     bool isSubLike = false;
 
+    TwitchEmoteSetKind kind = TwitchEmoteSetKind::Unspecified;
+
     /// @brief The title of this set
     ///
     /// We generate this based on the emote set's flags & owner
     QString title() const;
 };
 using TwitchEmoteSetMap = boost::unordered_flat_map<EmoteSetId, TwitchEmoteSet>;
+
+struct TwitchChannelEmoteInfo {
+    QString id;
+    QString name;
+    QString type;
+    QString tier;
+};
+
+struct LocalTwitchEmoteCatalog {
+    EmoteMap emotes;
+    /// Pre-ordered T1, T2, T3, then Follower. Empty kinds are omitted.
+    std::vector<TwitchEmoteSet> sets;
+};
+
+class ITwitchEmotes;
+
+LocalTwitchEmoteCatalog buildLocalTwitchEmoteCatalog(
+    const std::vector<TwitchChannelEmoteInfo> &emotes, bool includeFollower,
+    std::shared_ptr<TwitchUser> owner, ITwitchEmotes &twitchEmotes);
+
+/// True when the picker should hide this channel's account sub set because
+/// the local catalog already lists those emotes. Bits stay visible.
+bool skipCurrentChannelAccountSubSet(bool localCatalogHasSets,
+                                     const QString &currentChannelID,
+                                     const TwitchEmoteSet &set);
 
 struct HelixChannelEmote;
 

@@ -9,6 +9,7 @@
 #include "widgets/BasePopup.hpp"
 
 #include <pajlada/signals/signal.hpp>
+#include <pajlada/signals/signalholder.hpp>
 #include <QLineEdit>
 
 namespace chatterino {
@@ -50,6 +51,7 @@ private:
 
     ChannelPtr channel_;
     TwitchChannel *twitchChannel_{};
+    pajlada::Signals::SignalHolder channelSignalHolder_;
 
     QLineEdit *search_;
     Notebook *notebook_;

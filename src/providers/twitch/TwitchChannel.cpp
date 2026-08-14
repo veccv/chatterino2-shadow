@@ -58,6 +58,8 @@
 #include <QTimer>
 #include <rapidjson/document.h>
 
+#include <optional>
+
 using namespace Qt::StringLiterals;
 
 namespace chatterino {
@@ -130,7 +132,7 @@ TwitchChannel::TwitchChannel(const QString &name)
     , subscriptionUrl_("https://www.twitch.tv/subs/" + name)
     , channelUrl_("https://www.twitch.tv/" + name)
     , popoutPlayerUrl_(TWITCH_PLAYER_URL.arg(name))
-    , localTwitchEmotes_(std::make_shared<EmoteMap>())
+    , localTwitchCatalog_(std::make_shared<const LocalTwitchEmoteCatalog>())
     , bttvEmotes_(std::make_shared<EmoteMap>())
     , ffzEmotes_(std::make_shared<EmoteMap>())
     , seventvEmotes_(std::make_shared<EmoteMap>())
@@ -205,9 +207,8 @@ TwitchChannel::TwitchChannel(const QString &name)
             relay->messageReceived, [this](const ShadowWireEvent &ev) {
                 if (!ev.roomId.isEmpty() && ev.roomId == this->roomId())
                 {
-                    this->addShadowChatLine(ev.login, ev.text,
-                                            QColor(ev.color), ev.id,
-                                            ev.replyParentId);
+                    this->addShadowChatLine(ev.login, ev.text, QColor(ev.color),
+                                            ev.id, ev.replyParentId);
                 }
             });
     }
@@ -222,15 +223,6 @@ TwitchChannel::TwitchChannel(const QString &name)
         [this](auto *caller, const auto &result) {
             if (result)
             {
-                // emotes were reloaded - clear follower emotes if the user is
-                // now subscribed to the streamer
-                if (!this->localTwitchEmotes_.get()->empty() &&
-                    getApp()->getAccounts()->twitch.getCurrent()->hasEmoteSet(
-                        EmoteSetId{this->localTwitchEmoteSetID_.get()}))
-                {
-                    this->localTwitchEmotes_.set(std::make_shared<EmoteMap>());
-                }
-
                 if (caller == this)
                 {
                     this->addSystemMessage(
@@ -356,66 +348,84 @@ void TwitchChannel::refreshTwitchChannelEmotes(bool manualRefresh)
         getApp()->getAccounts()->twitch.getCurrent()->reloadEmotes(this);
     }
 
-    // Twitch's 'Get User Emotes' doesn't assigns a different set-ID to follower
-    // emotes compared to subscriber emotes.
-    QString setID = TWITCH_SUB_EMOTE_SET_PREFIX % this->roomId();
-    this->localTwitchEmoteSetID_.set(setID);
-    if (getApp()->getAccounts()->twitch.getCurrent()->hasEmoteSet(
-            EmoteSetId{setID}))
-    {
-        this->localTwitchEmotes_.set(std::make_shared<EmoteMap>());
-        return;
-    }
+    auto account = getApp()->getAccounts()->twitch.getCurrent();
+    const auto roomId = this->roomId();
+    const auto channelName = this->getName();
+    const auto isAnon = account->isAnon();
+    const auto generation = ++this->localTwitchEmoteRefreshGeneration_;
 
-    auto makeEmotes = [](const auto &emotes) {
-        EmoteMap map;
-        for (const auto &emote : emotes)
+    auto emotesHolder =
+        std::make_shared<std::optional<std::vector<TwitchChannelEmoteInfo>>>();
+    auto followHolder = std::make_shared<std::optional<bool>>();
+
+    auto apply = [weak = this->weakFromThis(), emotesHolder, followHolder,
+                  roomId, channelName, generation] {
+        auto self = weak.lock();
+        if (!self ||
+            self->localTwitchEmoteRefreshGeneration_.load() != generation ||
+            self->roomId() != roomId || !emotesHolder->has_value() ||
+            !followHolder->has_value())
         {
-            if (emote.type != u"follower")
-            {
-                continue;
-            }
-            map.emplace(
-                EmoteName{emote.name},
-                getApp()->getEmotes()->getTwitchEmotes()->getOrCreateEmote(
-                    EmoteId{emote.id}, EmoteName{emote.name}));
+            return;
         }
-        return map;
+
+        auto owner = std::make_shared<TwitchUser>(TwitchUser{
+            .id = roomId,
+            .name = channelName,
+            .displayName = channelName,
+        });
+        auto catalog = buildLocalTwitchEmoteCatalog(
+            **emotesHolder, **followHolder, owner,
+            *getApp()->getEmotes()->getTwitchEmotes());
+        self->setLocalTwitchCatalog(
+            std::make_shared<const LocalTwitchEmoteCatalog>(
+                std::move(catalog)));
     };
 
-    getHelix()->getFollowedChannel(
-        getApp()->getAccounts()->twitch.getCurrent()->getUserId(),
-        this->roomId(), nullptr,
-        [weak{this->weakFromThis()}, makeEmotes](const auto &chan) {
+    getHelix()->getChannelEmotes(
+        roomId,
+        [emotesHolder, apply](const auto &emotes) {
+            std::vector<TwitchChannelEmoteInfo> infos;
+            infos.reserve(emotes.size());
+            for (const auto &emote : emotes)
+            {
+                infos.push_back(emote.toChannelInfo());
+            }
+            *emotesHolder = std::move(infos);
+            apply();
+        },
+        [weak = this->weakFromThis(), isAnon, generation] {
             auto self = weak.lock();
-            if (!self || !chan)
+            if (!self ||
+                self->localTwitchEmoteRefreshGeneration_.load() != generation)
             {
                 return;
             }
-            getHelix()->getChannelEmotes(
-                self->roomId(),
-                [weak, makeEmotes](const auto &emotes) {
-                    auto self = weak.lock();
-                    if (!self)
-                    {
-                        return;
-                    }
+            self->setLocalTwitchCatalog(
+                std::make_shared<const LocalTwitchEmoteCatalog>());
+            if (!isAnon)
+            {
+                self->addSystemMessage("Failed to load channel Twitch emotes.");
+            }
+        });
 
-                    self->localTwitchEmotes_.set(
-                        std::make_shared<EmoteMap>(makeEmotes(emotes)));
-                },
-                [weak] {
-                    auto self = weak.lock();
-                    if (!self)
-                    {
-                        return;
-                    }
-                    self->addSystemMessage("Failed to load follower emotes.");
-                });
+    if (isAnon || account->getUserId().isEmpty())
+    {
+        *followHolder = false;
+        return;
+    }
+
+    getHelix()->getFollowedChannel(
+        account->getUserId(), roomId, nullptr,
+        [followHolder, apply](const auto &chan) {
+            *followHolder = chan.has_value();
+            apply();
         },
-        [](const auto &error) {
+        [followHolder, apply](const auto &error) {
             qCWarning(chatterinoTwitch)
                 << "Failed to get following status:" << error;
+            *followHolder = false;
+            apply();
         });
 }
 
@@ -536,6 +546,17 @@ void TwitchChannel::refreshSevenTVChannelEmotes(bool manualRefresh)
 void TwitchChannel::setBttvEmotes(std::shared_ptr<const EmoteMap> &&map)
 {
     this->bttvEmotes_.set(std::move(map));
+}
+
+void TwitchChannel::setLocalTwitchCatalog(
+    std::shared_ptr<const LocalTwitchEmoteCatalog> catalog)
+{
+    if (!catalog)
+    {
+        catalog = std::make_shared<const LocalTwitchEmoteCatalog>();
+    }
+    this->localTwitchCatalog_.set(std::move(catalog));
+    this->localTwitchEmotesChanged.invoke();
 }
 
 void TwitchChannel::setFfzEmotes(std::shared_ptr<const EmoteMap> &&map)
@@ -953,9 +974,10 @@ void TwitchChannel::sendReply(const QString &message, const QString &replyId,
     this->sendReplyWithTarget(message, replyId, target, parentIsShadow);
 }
 
-void TwitchChannel::sendReplyWithTarget(
-    const QString &message, const QString &replyId,
-    std::optional<ShadowSendTarget> target, bool parentIsShadow)
+void TwitchChannel::sendReplyWithTarget(const QString &message,
+                                        const QString &replyId,
+                                        std::optional<ShadowSendTarget> target,
+                                        bool parentIsShadow)
 {
     auto *app = getApp();
     if (!app->getAccounts()->twitch.isLoggedIn())
@@ -1040,8 +1062,7 @@ bool TwitchChannel::tryInterceptShadowSend(
     if (!relay || !relay->isAuthenticated() || this->roomId().isEmpty() ||
         parsedMessage.isEmpty())
     {
-        this->addSystemMessage(
-            QStringLiteral("Couldn't send to shadow chat."));
+        this->addSystemMessage(QStringLiteral("Couldn't send to shadow chat."));
         sent = false;
         return true;
     }
@@ -1055,15 +1076,13 @@ bool TwitchChannel::tryInterceptShadowSend(
     }
     if (!relay->publish(this->roomId(), parsedMessage, id, color, replyId))
     {
-        this->addSystemMessage(
-            QStringLiteral("Couldn't send to shadow chat."));
+        this->addSystemMessage(QStringLiteral("Couldn't send to shadow chat."));
         sent = false;
         return true;
     }
 
-    qCDebug(chatterinoShadow)
-        << "[TwitchChannel" << this->getName()
-        << "] Shadow send:" << parsedMessage;
+    qCDebug(chatterinoShadow) << "[TwitchChannel" << this->getName()
+                              << "] Shadow send:" << parsedMessage;
     auto login = relay->validatedLogin();
     if (login.isEmpty())
     {
@@ -1124,12 +1143,12 @@ void TwitchChannel::addShadowChatLine(const QString &login, const QString &text,
         }
     }
 
-    this->addMessage(MessageBuilder::makeShadowChatMessage(
-                         login, text, this, nickColor, messageId, thread,
-                         parent, std::move(cosmetics.badges),
-                         std::move(cosmetics.badgeInfos), cosmetics.userID,
-                         cosmetics.useChannelBadgeSets),
-                     MessageContext::Original);
+    this->addMessage(
+        MessageBuilder::makeShadowChatMessage(
+            login, text, this, nickColor, messageId, thread, parent,
+            std::move(cosmetics.badges), std::move(cosmetics.badgeInfos),
+            cosmetics.userID, cosmetics.useChannelBadgeSets),
+        MessageContext::Original);
 }
 
 void TwitchChannel::setSelfTwitchBadges(
@@ -1149,8 +1168,7 @@ void TwitchChannel::setSelfSubscriptionBadge(std::optional<TwitchBadge> badge)
 
 void TwitchChannel::refreshBannedSelfBadges()
 {
-    if (getApp()->isTest() ||
-        this->restriction_ != ChannelRestriction::Banned)
+    if (getApp()->isTest() || this->restriction_ != ChannelRestriction::Banned)
     {
         return;
     }
@@ -1175,12 +1193,11 @@ void TwitchChannel::refreshBannedSelfBadges()
                 shared->setSelfSubscriptionBadge(std::nullopt);
                 return;
             }
-            shared->setSelfSubscriptionBadge(TwitchBadge(
-                QStringLiteral("subscriber"),
-                subscriberBadgeValueForTier(subscription->tier)));
+            shared->setSelfSubscriptionBadge(
+                TwitchBadge(QStringLiteral("subscriber"),
+                            subscriberBadgeValueForTier(subscription->tier)));
         },
-        [](const QString &) {
-        });
+        [](const QString &) {});
 }
 
 TwitchChannel::TwitchUserCosmetics TwitchChannel::cosmeticsForLogin(
@@ -1231,8 +1248,7 @@ TwitchChannel::TwitchUserCosmetics TwitchChannel::cosmeticsForLogin(
         {
             auto insertAt = out.badges.begin();
             while (insertAt != out.badges.end() &&
-                   insertAt->flag_ ==
-                       MessageElementFlag::BadgeGlobalAuthority)
+                   insertAt->flag_ == MessageElementFlag::BadgeGlobalAuthority)
             {
                 ++insertAt;
             }
@@ -1445,7 +1461,23 @@ std::optional<EmotePtr> TwitchChannel::seventvEmote(const EmoteName &name) const
 
 std::shared_ptr<const EmoteMap> TwitchChannel::localTwitchEmotes() const
 {
-    return this->localTwitchEmotes_.get();
+    auto catalog = this->localTwitchCatalog_.get();
+    if (!catalog)
+    {
+        return std::make_shared<EmoteMap>();
+    }
+    return {catalog, &catalog->emotes};
+}
+
+std::shared_ptr<const std::vector<TwitchEmoteSet>>
+    TwitchChannel::localTwitchEmoteSets() const
+{
+    auto catalog = this->localTwitchCatalog_.get();
+    if (!catalog)
+    {
+        return std::make_shared<std::vector<TwitchEmoteSet>>();
+    }
+    return {catalog, &catalog->sets};
 }
 
 std::shared_ptr<const EmoteMap> TwitchChannel::bttvEmotes() const
