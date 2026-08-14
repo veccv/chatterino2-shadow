@@ -172,6 +172,24 @@ public:
     std::unique_ptr<MockApplication> mockApplication;
 };
 
+TEST_F(InputHighlighterTest, localTwitchEmoteSkippedFromSpellcheck)
+{
+    this->channel->setLocalTwitchCatalog(
+        std::make_shared<LocalTwitchEmoteCatalog>(LocalTwitchEmoteCatalog{
+            .emotes = *makeEmotes(u"TierTwoEmote"_s),
+        }));
+
+    SpellChecker nullSpellChecker;
+    InputHighlighter highlighter(nullSpellChecker, nullptr);
+    highlighter.setChannel(this->channel);
+
+    EXPECT_EQ(highlighter.getSpellCheckedWords(u"hello TierTwoEmote world"_s),
+              (std::vector<QString>{u"hello"_s, u"world"_s}));
+    EXPECT_EQ(
+        highlighter.getSpellCheckedWords(u"still MyCoolTwitchEmote here"_s),
+        (std::vector<QString>{u"still"_s, u"here"_s}));
+}
+
 TEST_F(InputHighlighterTest, getSpellCheckedWords)
 {
     struct Case {

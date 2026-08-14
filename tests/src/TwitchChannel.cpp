@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-#include "providers/twitch/TwitchAccount.hpp"
 #include "providers/twitch/TwitchChannel.hpp"
 
 #include "controllers/accounts/AccountController.hpp"
@@ -20,6 +19,7 @@
 #include "providers/ffz/FfzEmotes.hpp"
 #include "providers/seventv/SeventvEmotes.hpp"
 #include "providers/twitch/api/Helix.hpp"
+#include "providers/twitch/TwitchAccount.hpp"
 #include "providers/twitch/TwitchBadge.hpp"
 #include "providers/twitch/TwitchBadges.hpp"
 #include "Test.hpp"
@@ -419,8 +419,7 @@ TEST_F(TwitchChannelRestriction, ShadowLineCopiesTwitchBadgesFromLastIrcLine)
     ASSERT_EQ(messages.size(), 2);
     ASSERT_TRUE(messages[1]->flags.has(MessageFlag::ShadowMessage));
     ASSERT_EQ(messages[1]->twitchBadges.size(), 1);
-    EXPECT_EQ(messages[1]->twitchBadges[0].key_,
-              QStringLiteral("broadcaster"));
+    EXPECT_EQ(messages[1]->twitchBadges[0].key_, QStringLiteral("broadcaster"));
     EXPECT_EQ(messages[1]->userID, QStringLiteral("11148817"));
 }
 
@@ -572,6 +571,47 @@ TEST_F(TwitchChannelRestriction, ShadowLineUsesNickColor)
     auto messages = this->channel->getMessageSnapshot();
     ASSERT_EQ(messages.size(), 1);
     EXPECT_EQ(messages[0]->usernameColor, QColor("#FF69B4"));
+}
+
+TEST_F(TwitchChannelRestriction, LocalTwitchEmotesResolveAndRender)
+{
+    auto map = std::make_shared<EmoteMap>();
+    EmoteName name{QStringLiteral("TierTwoEmote")};
+    map->emplace(name, std::make_shared<Emote>(Emote{.name = name}));
+    this->channel->setLocalTwitchCatalog(
+        std::make_shared<LocalTwitchEmoteCatalog>(LocalTwitchEmoteCatalog{
+            .emotes = *map,
+        }));
+
+    ASSERT_TRUE(this->channel->twitchEmote(name).has_value());
+
+    this->channel->addShadowChatLine("pajlada", "hello TierTwoEmote");
+    auto messages = this->channel->getMessageSnapshot();
+    ASSERT_EQ(messages.size(), 1);
+    bool foundEmote = false;
+    for (const auto &element : messages[0]->elements)
+    {
+        if (dynamic_cast<const EmoteElement *>(element.get()) != nullptr)
+        {
+            foundEmote = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundEmote);
+}
+
+TEST_F(TwitchChannelRestriction, LocalTwitchEmotesAreChannelScoped)
+{
+    auto map = std::make_shared<EmoteMap>();
+    EmoteName name{QStringLiteral("TierTwoEmote")};
+    map->emplace(name, std::make_shared<Emote>(Emote{.name = name}));
+    this->channel->setLocalTwitchCatalog(
+        std::make_shared<LocalTwitchEmoteCatalog>(LocalTwitchEmoteCatalog{
+            .emotes = *map,
+        }));
+
+    auto other = std::make_shared<TwitchChannel>("forsen");
+    EXPECT_FALSE(other->twitchEmote(name).has_value());
 }
 
 TEST_F(TwitchChannelRestriction, ShadowLineRendersNamedEmote)

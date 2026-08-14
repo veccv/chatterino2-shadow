@@ -80,6 +80,25 @@ If the overlay cannot take a send, you get a system line (`Couldn't send to shad
 
 Tabs, splits, 7TV / BTTV / FFZ emotes, filters, highlights, moderation tools, plugins — all the client you already know. Shadow lines are filterable with `flags.shadow`. This is not a separate chat app glued on the side.
 
+## Vs Chatterino
+
+Stock [Chatterino](https://chatterino.com) is the same client for everything this table does not list. These are the fork-only controls and behaviors:
+
+| Option | Chatterino Shadow | Chatterino |
+| --- | --- | --- |
+| Channel after a ban | Stays open on your logged-in account. A hidden reader keeps live Twitch chat, uptime, and viewer count. | The tab goes dark. You leave the room or swap to anonymous / an alt. |
+| Talk while timed out or banned | Yes. Default send is **To Shadow**. | Timeout: you can read, you cannot send. Ban: you are out. |
+| Talk without phone verification | **To Shadow** goes to the overlay, so Twitch never asks for a verified phone. **To Chat** still follows Twitch’s rules. | Twitch blocks chat in many channels until the account has a verified phone. |
+| Header view | Cycles **Both** (Twitch + overlay), **Chat** (Twitch only), **Shadow** (overlay only). Default **Both**. | Twitch chat only. |
+| Header send | Cycles **To Shadow** (overlay) and **To Chat** (Twitch). Default **To Shadow**. | Twitch only. |
+| Overlay status | Input bar **ShadowChat** pill: green connected, yellow connecting, red disconnected. | — |
+| Overlay lines | Sunglasses **Shadow user** badge, plus Twitch badges this client can still show (including in a banned channel). | — |
+| Replies | Reply to a shadow line stays on the overlay. | Twitch replies only. |
+| Filters | `flags.shadow` matches overlay lines. | — |
+| Channel subscriber emotes | In the channel you are watching, every T1 / T2 / T3 emote from that channel is in the picker, completion, and local parse (including untagged / shadow lines). Twitch itself still only image-tags emotes you own. | Only the tiers your account has unlocked. |
+| Follower emotes | Still follow-gated. | Follow-gated. |
+| Bits emotes | Unchanged: only what your account has. | Same. |
+
 ## How it works
 
 ```
