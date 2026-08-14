@@ -16,6 +16,8 @@
 #include "mocks/Helix.hpp"
 #include "mocks/Logging.hpp"
 #include "mocks/TwitchIrcServer.hpp"
+#include "providers/twitch/TwitchAccount.hpp"
+#include "providers/twitch/TwitchChannel.hpp"
 #include "singletons/Paths.hpp"
 #include "singletons/Settings.hpp"
 #include "Test.hpp"
@@ -581,4 +583,56 @@ TEST_F(InputCompletionTest, SmartTabCompletionCase)
 
     completion = querySmartTabCompletion("nothing", false);
     ASSERT_EQ(completion.size(), 0);
+}
+
+TEST_F(InputCompletionTest, LocalTwitchEmotesDedupeAccount)
+{
+    auto channel = std::make_shared<TwitchChannel>("pajlada");
+    auto locals = std::make_shared<EmoteMap>();
+    addEmote(*locals, "TierTwoEmote");
+    LocalTwitchEmoteCatalog catalog;
+    catalog.emotes = *locals;
+    channel->setLocalTwitchCatalog(
+        std::make_shared<LocalTwitchEmoteCatalog>(std::move(catalog)));
+
+    auto account = std::make_shared<EmoteMap>();
+    addEmote(*account, "TierTwoEmote");
+    addEmote(*account, "OtherChannelEmote");
+    this->mockApplication->accounts.twitch.getCurrent()->setEmotes(account);
+
+    EmoteSource source(channel.get(), std::make_unique<ClassicEmoteStrategy>());
+    source.update(":tiertwo");
+
+    int localCount = 0;
+    int accountCount = 0;
+    for (const auto &item : source.output())
+    {
+        if (item.displayName != QStringLiteral("TierTwoEmote"))
+        {
+            continue;
+        }
+        if (item.providerName == QStringLiteral("Local Twitch Emotes"))
+        {
+            localCount++;
+        }
+        if (item.providerName == QStringLiteral("Twitch Emote"))
+        {
+            accountCount++;
+        }
+    }
+    EXPECT_EQ(localCount, 1);
+    EXPECT_EQ(accountCount, 0);
+
+    source.update(":otherchannel");
+    bool foundOther = false;
+    for (const auto &item : source.output())
+    {
+        if (item.displayName == QStringLiteral("OtherChannelEmote") &&
+            item.providerName == QStringLiteral("Twitch Emote"))
+        {
+            foundOther = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundOther);
 }

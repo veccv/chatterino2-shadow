@@ -39,6 +39,7 @@
 #include <QTabWidget>
 
 #include <algorithm>
+#include <functional>
 #include <utility>
 
 using namespace Qt::Literals;
@@ -226,26 +227,30 @@ void addEmotes(Channel &channel, auto &&emotes, const QString &title)
                        MessageContext::Original);
 }
 
-void addTwitchEmoteSets(const std::shared_ptr<const EmoteMap> &local,
+void addTwitchEmoteSets(const std::vector<TwitchEmoteSet> &localSets,
                         const std::shared_ptr<const TwitchEmoteSetMap> &sets,
                         Channel &globalChannel, Channel &subChannel,
-                        const QString &currentChannelID,
-                        const QString &channelName)
+                        const QString &currentChannelID)
 {
-    if (!local->empty())
+    for (const auto &set : localSets)
     {
-        addEmotes(subChannel, *local, channelName % u" (Follower)");
+        addEmotes(subChannel, set.emotes, set.title());
     }
 
+    const auto hideCurrentChannelSubs = !localSets.empty();
     std::vector<
         std::pair<QString, std::reference_wrapper<const TwitchEmoteSet>>>
         sortedSets;
     sortedSets.reserve(sets->size());
     for (const auto &[_id, set] : *sets)
     {
-        if (set.owner->id == currentChannelID)
+        if (skipCurrentChannelAccountSubSet(hideCurrentChannelSubs,
+                                            currentChannelID, set))
         {
-            // Put current channel emotes at the top
+            continue;
+        }
+        if (set.owner && set.owner->id == currentChannelID)
+        {
             addEmotes(subChannel, set.emotes, set.title());
         }
         else
@@ -704,6 +709,15 @@ void EmotePopup::loadChannel(ChannelPtr channel)
     this->channel_ = std::move(channel);
     this->twitchChannel_ = dynamic_cast<TwitchChannel *>(this->channel_.get());
 
+    this->channelSignalHolder_.clear();
+    if (this->twitchChannel_)
+    {
+        this->channelSignalHolder_.managedConnect(
+            this->twitchChannel_->localTwitchEmotesChanged, [this] {
+                this->reloadEmotes();
+            });
+    }
+
     this->setWindowTitle("Emotes in #" + this->channel_->getName());
 
     this->globalEmotesView_->setChannel(
@@ -881,10 +895,9 @@ void EmotePopup::reloadEmotes()
     {
         // twitch
         addTwitchEmoteSets(
-            twitchChannel_->localTwitchEmotes(),
+            *twitchChannel_->localTwitchEmoteSets(),
             *getApp()->getAccounts()->twitch.getCurrent()->accessEmoteSets(),
-            *globalChannel, *subChannel, twitchChannel_->roomId(),
-            twitchChannel_->getName());
+            *globalChannel, *subChannel, twitchChannel_->roomId());
 
         // channel
         if (getSettings()->enableBTTVChannelEmotes)
@@ -979,17 +992,26 @@ void EmotePopup::filterTwitchEmotes(std::shared_ptr<Channel> searchChannel,
 {
     if (this->twitchChannel_)
     {
-        auto local = filterEmoteMap(searchWord, tags,
-                                    *this->twitchChannel_->localTwitchEmotes());
-        if (!local.empty())
+        auto localSets = this->twitchChannel_->localTwitchEmoteSets();
+        for (const auto &set : *localSets)
         {
-            addEmotes(*searchChannel, local,
-                      this->twitchChannel_->getName() % u" (Follower)");
+            auto filtered = filterEmoteMap(searchWord, tags, set.emotes);
+            if (!filtered.empty())
+            {
+                addEmotes(*searchChannel, std::move(filtered), set.title());
+            }
         }
 
+        auto currentChannelID = this->twitchChannel_->roomId();
+        const auto hideCurrentChannelSubs = !localSets->empty();
         for (const auto &[_id, set] :
              **getApp()->getAccounts()->twitch.getCurrent()->accessEmoteSets())
         {
+            if (skipCurrentChannelAccountSubSet(hideCurrentChannelSubs,
+                                                currentChannelID, set))
+            {
+                continue;
+            }
             auto filtered = filterEmoteMap(searchWord, tags, set.emotes);
             if (!filtered.empty())
             {
